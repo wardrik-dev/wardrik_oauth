@@ -29,10 +29,27 @@ defmodule WardrikOAuth.PartsTest do
              "_x"
   end
 
-  test "needs an issuer or a resource" do
-    assert_raise ArgumentError, ~r/needs an :issuer or a :resource/, fn ->
+  test "needs an issuer, a resource, or its endpoints" do
+    assert_raise ArgumentError, ~r/needs an :issuer, a :resource, or its endpoints/, fn ->
       Provider.new(:test, client_id: "client")
     end
+  end
+
+  test "keeps the params a browser sign-in sets itself" do
+    assert_raise ArgumentError, ~r/can't set/, fn ->
+      Provider.new(:test,
+        issuer: @issuer,
+        client_id: "client",
+        authorization_params: [state: "x"]
+      )
+    end
+  end
+
+  test "needs a server that offers a browser sign-in" do
+    metadata = %{metadata() | authorization_endpoint: nil}
+
+    assert {:error, {:no_browser_flow, @issuer}} =
+             WardrikOAuth.Browser.start(metadata, provider(), "https://app.test/callback")
   end
 
   describe "discovering metadata" do

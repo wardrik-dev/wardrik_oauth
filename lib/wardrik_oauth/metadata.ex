@@ -1,24 +1,50 @@
 defmodule WardrikOAuth.Metadata do
   @moduledoc """
   Metadata is what an authorization server says about itself, found from its issuer.
+
+  With an issuer, it's read from RFC 8414's well-known path, then OpenID's. Without one, the issuer
+  is found first from the resource's metadata, RFC 9728. The answer must name the issuer it was
+  asked about. A provider that names its own endpoints skips all of this.
   """
 
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Request
 
-  @enforce_keys [:issuer, :token_endpoint]
-  defstruct [:issuer, :token_endpoint, :device_authorization_endpoint]
+  @enforce_keys [:token_endpoint]
+  defstruct [
+    :issuer,
+    :token_endpoint,
+    :authorization_endpoint,
+    :device_authorization_endpoint,
+    iss_supported?: false
+  ]
 
   @typedoc "What an authorization server says about itself."
   @type t() :: %__MODULE__{
-          issuer: String.t(),
+          issuer: String.t() | nil,
           token_endpoint: String.t(),
-          device_authorization_endpoint: String.t() | nil
+          authorization_endpoint: String.t() | nil,
+          device_authorization_endpoint: String.t() | nil,
+          iss_supported?: boolean()
         }
 
   @doc "Finds the metadata of `provider`'s authorization server."
   @spec discover(Provider.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def discover(%Provider{} = provider, req_options) do
+    if Provider.endpoints?(provider),
+      do: {:ok, named(provider)},
+      else: discovered(provider, req_options)
+  end
+
+  defp named(%Provider{} = provider) do
+    %__MODULE__{
+      issuer: provider.issuer,
+      authorization_endpoint: provider.authorization_endpoint,
+      token_endpoint: provider.token_endpoint
+    }
+  end
+
+  defp discovered(provider, req_options) do
     with {:ok, issuer} <- issuer(provider, req_options),
          {:ok, body} <- server_metadata(issuer, req_options),
          :ok <- same_issuer(body, issuer) do
@@ -54,7 +80,9 @@ defmodule WardrikOAuth.Metadata do
      %__MODULE__{
        issuer: issuer,
        token_endpoint: token_endpoint,
-       device_authorization_endpoint: body["device_authorization_endpoint"]
+       authorization_endpoint: body["authorization_endpoint"],
+       device_authorization_endpoint: body["device_authorization_endpoint"],
+       iss_supported?: body["authorization_response_iss_parameter_supported"] == true
      }}
   end
 

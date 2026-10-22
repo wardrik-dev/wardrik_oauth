@@ -51,14 +51,41 @@ defmodule WardrikOAuthTest do
            issuer: GitHub.issuer(),
            client_id: "client",
            client_secret: "secret",
-           scopes: ["repo"]
+           scopes: ["repo"],
+           flow: :device
          ],
-         copilot: [resource: "https://api.github.test/mcp/", client_id: "client"]
+         copilot: [resource: "https://api.github.test/mcp/", client_id: "client", flow: :device],
+         github_web: [issuer: GitHub.issuer(), client_id: "client", client_secret: "secret"],
+         google: [
+           issuer: "https://accounts.test",
+           client_id: "google-client",
+           client_secret: "google-secret",
+           scopes: ["openid", "email"],
+           authorization_params: %{access_type: "offline", prompt: "consent"}
+         ],
+         linear: [
+           authorization_endpoint: "https://linear.test/oauth/authorize",
+           token_endpoint: "https://linear.test/oauth/token",
+           client_id: "linear-client",
+           client_secret: "linear-secret",
+           scopes: ["read"]
+         ]
        ]}
     )
 
     %{vault: vault, oauth: oauth}
   end
+
+  defp get(oauth, path) do
+    :get
+    |> Plug.Test.conn(path)
+    |> WardrikOAuth.Plug.call(WardrikOAuth.Plug.init(oauth: oauth))
+  end
+
+  defp state({:authorize, url}), do: URI.decode_query(URI.parse(url).query)["state"]
+
+  defp challenge(verifier),
+    do: :sha256 |> :crypto.hash(verifier) |> Base.url_encode64(padding: false)
 
   defp keep(vault, token),
     do: WardrikVault.put(vault, @jon, "github", Token.encode(token), kind: :grant)
@@ -103,7 +130,102 @@ defmodule WardrikOAuthTest do
     end
 
     test "asks nothing for a name it has no provider for", %{vault: vault} do
-      assert WardrikVault.resolve("linear", @jon, vault) == {:error, :not_found}
+      assert WardrikVault.resolve("notion", @jon, vault) == {:error, :not_found}
+    end
+
+    @tag polls: []
+    test "shows the code on its page", %{vault: vault, oauth: oauth} do
+      {:authorize, "https://agents.test/oauth/device/" <> id} =
+        WardrikVault.resolve("github", @jon, vault)
+
+      conn = get(oauth, "/device/" <> id)
+      assert conn.status == 200
+      assert conn.resp_body =~ "WDJB-MJHT"
+      assert conn.resp_body =~ ~s(href="https://github.test/login/device")
+
+      assert get(oauth, "/device/nope").status == 404
+      assert get(oauth, "/elsewhere").status == 404
+    end
+  end
+
+  describe "signing in in a browser" do
+    test "sends the principal to the service, and keeps the grant when they come back",
+         %{vault: vault, oauth: oauth} do
+      assert {:authorize, url} = WardrikVault.resolve("google", @jon, vault)
+      %URI{host: "accounts.test", path: "/authorize", query: query} = URI.parse(url)
+      params = URI.decode_query(query)
+
+      assert %{
+               "hd" => "example.com",
+               "client_id" => "google-client",
+               "redirect_uri" => "https://agents.test/oauth/callback",
+               "scope" => "openid email",
+               "access_type" => "offline",
+               "prompt" => "consent",
+               "code_challenge_method" => "S256"
+             } = params
+
+      assert WardrikVault.resolve("google", @jon, vault) == {:authorize, url}
+
+      callback = "/callback?" <> URI.encode_query(%{state: params["state"], code: "the-code"})
+      conn = get(oauth, callback)
+      assert conn.status == 200
+      assert conn.resp_body =~ "signed in to google"
+
+      assert_received {:exchanged, %{"code" => "the-code", "code_verifier" => verifier} = form}
+      assert form["client_secret"] == "google-secret"
+      assert challenge(verifier) == params["code_challenge"]
+      assert_receive {:granted, "google", "user:jon"}
+      assert WardrikVault.resolve("google", @jon, vault) == {:ok, "browser_token"}
+
+      replayed = get(oauth, callback)
+      assert replayed.status == 400
+      assert replayed.resp_body =~ "already used"
+    end
+
+    test "uses the endpoints an app names, with nothing to discover", %{
+      vault: vault,
+      oauth: oauth
+    } do
+      assert {:authorize, "https://linear.test/oauth/authorize?" <> query} =
+               WardrikVault.resolve("linear", @jon, vault)
+
+      state = URI.decode_query(query)["state"]
+
+      assert {:ok, "linear"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
+      assert_received {:exchanged, %{"client_id" => "linear-client"}}
+    end
+
+    test "takes a code only from the issuer that promised to say so", %{
+      vault: vault,
+      oauth: oauth
+    } do
+      state = state(WardrikVault.resolve("github_web", @jon, vault))
+      evil = %{"state" => state, "code" => "c", "iss" => "https://evil.test"}
+
+      assert {:error, :wrong_issuer} = WardrikOAuth.finish(oauth, evil)
+      assert_receive {:done, {:error, :wrong_issuer}}
+      refute_received {:exchanged, _form}
+
+      state = state(WardrikVault.resolve("github_web", @jon, vault))
+      honest = %{"state" => state, "code" => "c", "iss" => GitHub.issuer()}
+      assert {:ok, "github_web"} = WardrikOAuth.finish(oauth, honest)
+    end
+
+    test "ends when the principal declines", %{vault: vault, oauth: oauth} do
+      state = state(WardrikVault.resolve("google", @jon, vault))
+
+      conn = get(oauth, "/callback?" <> URI.encode_query(%{state: state, error: "access_denied"}))
+      assert conn.status == 400
+      assert conn.resp_body =~ "declined"
+      assert_receive {:done, {:error, {:refused, "access_denied"}}}
+    end
+
+    test "needs a state, and a code", %{vault: vault, oauth: oauth} do
+      assert WardrikOAuth.finish(oauth, %{"code" => "c"}) == {:error, :no_such_flow}
+
+      state = state(WardrikVault.resolve("google", @jon, vault))
+      assert WardrikOAuth.finish(oauth, %{"state" => state}) == {:error, :no_code}
     end
   end
 

@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Flow do
   @moduledoc """
-  A flow is one sign-in under way, a process polling the server until the principal finishes.
+  A flow is one sign-in under way, a process holding what it needs until the principal finishes.
   """
 
   use GenServer, restart: :temporary
@@ -8,6 +8,7 @@ defmodule WardrikOAuth.Flow do
   require Logger
 
   alias WardrikCore.Principal
+  alias WardrikOAuth.Browser
   alias WardrikOAuth.Device
   alias WardrikOAuth.Metadata
   alias WardrikOAuth.Provider
@@ -27,9 +28,13 @@ defmodule WardrikOAuth.Flow do
     end
   end
 
-  @doc "Describes the flow `id` names, for a page or a CLI to show its code."
+  @doc "Describes the flow, for a page or a CLI to show."
   @spec describe(pid()) :: map()
   def describe(pid), do: GenServer.call(pid, :describe)
+
+  @doc "Finishes a browser flow with the parameters its callback carried."
+  @spec finish(pid(), map()) :: {:ok, String.t()} | {:error, term()}
+  def finish(pid, params), do: GenServer.call(pid, {:finish, params}, :timer.seconds(30))
 
   @doc false
   def start_link({settings, provider, principal}) do
@@ -40,22 +45,15 @@ defmodule WardrikOAuth.Flow do
   @impl GenServer
   def init({settings, provider, principal}) do
     with {:ok, metadata} <- Metadata.discover(provider, settings.req_options),
-         {:ok, device} <- Device.request(metadata, provider, settings.req_options) do
-      id = 18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
-      {:ok, _owner} = Registry.register(settings.registry, {:id, id}, nil)
-      Process.send_after(self(), :expire, min(@lifetime, :timer.seconds(device.expires_in)))
-      schedule(:timer.seconds(device.interval))
-
-      {:ok,
-       %{
-         settings: settings,
-         provider: provider,
-         principal: principal,
-         metadata: metadata,
-         device: device,
-         interval: :timer.seconds(device.interval),
-         url: settings.page <> "/device/" <> id
-       }}
+         flow = %{
+           settings: settings,
+           provider: provider,
+           principal: principal,
+           metadata: metadata
+         },
+         {:ok, flow} <- start(provider.flow, flow) do
+      Process.send_after(self(), :expire, @lifetime)
+      {:ok, flow}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -64,15 +62,19 @@ defmodule WardrikOAuth.Flow do
   @impl GenServer
   def handle_call(:url, _from, flow), do: {:reply, flow.url, flow}
 
-  def handle_call(:describe, _from, flow) do
-    {:reply,
-     %{
-       provider: flow.provider.name,
-       principal: flow.principal,
-       user_code: flow.device.user_code,
-       verification_uri: flow.device.verification_uri
-     }, flow}
+  def handle_call(:describe, _from, flow), do: {:reply, described(flow), flow}
+
+  def handle_call({:finish, %{"error" => error}}, _from, flow) do
+    outcome = {:error, {:refused, error}}
+    {:stop, :normal, outcome, ended(flow, outcome)}
   end
+
+  def handle_call({:finish, %{"code" => code} = params}, _from, %{kind: :browser} = flow) do
+    outcome = exchanged(flow, code, params["iss"])
+    {:stop, :normal, finished(outcome, flow), ended(flow, outcome)}
+  end
+
+  def handle_call({:finish, _params}, _from, flow), do: {:reply, {:error, :no_code}, flow}
 
   @impl GenServer
   def handle_info(:poll, flow) do
@@ -81,10 +83,63 @@ defmodule WardrikOAuth.Flow do
     |> polled(flow)
   end
 
-  def handle_info(:expire, flow), do: done(flow, {:error, :expired})
+  def handle_info(:expire, flow), do: {:stop, :normal, ended(flow, {:error, :expired})}
 
-  defp polled({:ok, %Token{} = token}, flow), do: done(flow, granted(flow, token))
-  defp polled({:error, reason}, flow), do: done(flow, {:error, reason})
+  defp start(:device, flow) do
+    with {:ok, device} <- Device.request(flow.metadata, flow.provider, flow.settings.req_options) do
+      id = random()
+      {:ok, _owner} = Registry.register(flow.settings.registry, {:id, id}, nil)
+      schedule(:timer.seconds(device.interval))
+
+      {:ok,
+       Map.merge(flow, %{
+         kind: :device,
+         device: device,
+         interval: :timer.seconds(device.interval),
+         url: flow.settings.page <> "/device/" <> id
+       })}
+    end
+  end
+
+  defp start(:browser, flow) do
+    with {:ok, started} <- Browser.start(flow.metadata, flow.provider, redirect_uri(flow)) do
+      {:ok, _owner} = Registry.register(flow.settings.registry, {:state, started.state}, nil)
+      {:ok, Map.merge(flow, %{kind: :browser, url: started.url, verifier: started.verifier})}
+    end
+  end
+
+  defp described(%{kind: :device} = flow) do
+    %{
+      provider: flow.provider.name,
+      principal: flow.principal,
+      user_code: flow.device.user_code,
+      verification_uri: flow.device.verification_uri
+    }
+  end
+
+  defp described(flow),
+    do: %{provider: flow.provider.name, principal: flow.principal, url: flow.url}
+
+  defp exchanged(flow, code, iss) do
+    options = [redirect_uri: redirect_uri(flow), req_options: flow.settings.req_options]
+
+    with :ok <- issuer(flow.metadata, iss),
+         {:ok, token} <-
+           Browser.exchange(flow.metadata, flow.provider, code, flow.verifier, options) do
+      granted(flow, token)
+    end
+  end
+
+  defp issuer(metadata, iss),
+    do: if(Browser.issued_by?(metadata, iss), do: :ok, else: {:error, :wrong_issuer})
+
+  defp finished(:granted, flow), do: {:ok, flow.provider.name}
+  defp finished(outcome, _flow), do: outcome
+
+  defp polled({:ok, %Token{} = token}, flow),
+    do: {:stop, :normal, ended(flow, granted(flow, token))}
+
+  defp polled({:error, reason}, flow), do: {:stop, :normal, ended(flow, {:error, reason})}
 
   defp polled(waiting, flow) do
     interval = Device.next_interval(waiting, flow.interval)
@@ -106,7 +161,7 @@ defmodule WardrikOAuth.Flow do
   defp tell({module, function, args}, name, principal),
     do: apply(module, function, [name, principal | args])
 
-  defp done(flow, outcome) do
+  defp ended(flow, outcome) do
     if outcome != :granted,
       do:
         Logger.info(
@@ -119,8 +174,12 @@ defmodule WardrikOAuth.Flow do
       outcome: outcome
     })
 
-    {:stop, :normal, flow}
+    flow
   end
+
+  defp redirect_uri(flow), do: flow.settings.page <> "/callback"
+
+  defp random, do: 18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
 
   defp schedule(interval), do: Process.send_after(self(), :poll, interval)
 end

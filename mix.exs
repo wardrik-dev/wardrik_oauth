@@ -73,7 +73,7 @@ defmodule WardrikOAuth.MixProject do
       {:wardrik_core, path: "../wardrik_core"},
       {:wardrik_vault, path: "../wardrik_vault"},
       {:req, "~> 0.5"},
-      {:plug, "~> 1.16", only: :test},
+      {:plug, "~> 1.16"},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

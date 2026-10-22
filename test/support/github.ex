@@ -1,5 +1,5 @@
 defmodule WardrikOAuth.GitHub do
-  @moduledoc "A stub GitHub the tests sign in with: device codes, polls answered in turn, and refreshes."
+  @moduledoc "Stub authorization servers the tests sign in with: device codes, polls answered in turn, codes and refreshes."
 
   @issuer "https://github.test/login/oauth"
 
@@ -27,7 +27,27 @@ defmodule WardrikOAuth.GitHub do
     Req.Test.json(conn, %{
       "issuer" => @issuer,
       "token_endpoint" => "https://github.test/login/oauth/access_token",
-      "device_authorization_endpoint" => "https://github.test/login/device/code"
+      "authorization_endpoint" => "https://github.test/login/oauth/authorize",
+      "device_authorization_endpoint" => "https://github.test/login/device/code",
+      "authorization_response_iss_parameter_supported" => true
+    })
+  end
+
+  defp answer(conn, "GET", "/.well-known/openid-configuration", _form, _polls, _test) do
+    Req.Test.json(conn, %{
+      "issuer" => "https://accounts.test",
+      "authorization_endpoint" => "https://accounts.test/authorize?hd=example.com",
+      "token_endpoint" => "https://accounts.test/token"
+    })
+  end
+
+  defp answer(conn, "POST", _path, %{"grant_type" => "authorization_code"} = form, _polls, test) do
+    send(test, {:exchanged, form})
+
+    Req.Test.json(conn, %{
+      "access_token" => "browser_token",
+      "refresh_token" => "rt",
+      "expires_in" => 3600
     })
   end
 
@@ -58,10 +78,13 @@ defmodule WardrikOAuth.GitHub do
   end
 
   defp answer(conn, "POST", "/login/oauth/access_token", _device, polls, _test),
-    do: Req.Test.json(conn, Agent.get_and_update(polls, fn [next | rest] -> {next, rest} end))
+    do: Req.Test.json(conn, Agent.get_and_update(polls, &next_poll/1))
 
   defp answer(conn, _method, _path, _form, _polls, _test),
     do: conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+
+  defp next_poll([next | rest]), do: {next, rest}
+  defp next_poll([]), do: {%{"error" => "authorization_pending"}, []}
 end
 
 defmodule WardrikOAuth.TestHook do

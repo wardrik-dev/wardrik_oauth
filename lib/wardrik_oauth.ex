@@ -20,9 +20,10 @@ defmodule WardrikOAuth do
          ]}
       ]
 
-  A tool that needs `github`, for a principal who hasn't authorized it, parks on a sign-in. The
-  principal opens `page` followed by `/device/<id>`, and enters the code shown there at GitHub's
-  page. `flow/2` describes a sign-in for whatever shows that page. Once they've authorized,
+  Mount `WardrikOAuth.Plug` at `page` in your app's router. A tool that needs `github`, for a
+  principal who hasn't authorized it, parks on a sign-in URL. In a browser sign-in, that's the
+  service's own page, which sends them back to `page` followed by `/callback`. In a device sign-in,
+  it's `page` followed by `/device/<id>`, which shows a code to enter. Once they've authorized,
   `on_granted` is called with the provider's name and the principal, so your app can resume the
   turns waiting on it.
 
@@ -57,7 +58,7 @@ defmodule WardrikOAuth do
     Supervisor.start_link(__MODULE__, Map.new(opts), name: name)
   end
 
-  @doc "Describes the sign-in `id` names, with the code to enter and where, or returns `:error`."
+  @doc "Describes the device sign-in `id` names, with the code to enter and where, or returns `:error`."
   @spec flow(atom(), String.t()) :: {:ok, map()} | :error
   def flow(oauth, id) do
     case Registry.lookup(registry(oauth), {:id, id}) do
@@ -65,6 +66,21 @@ defmodule WardrikOAuth do
       [] -> :error
     end
   end
+
+  @doc """
+  Finishes the browser sign-in a callback's `state` names, with the `code` or `error` it carried.
+
+  `WardrikOAuth.Plug` calls this. Call it yourself from a route of your own.
+  """
+  @spec finish(atom(), map()) :: {:ok, String.t()} | {:error, term()}
+  def finish(oauth, %{"state" => state} = params) when is_binary(state) do
+    case Registry.lookup(registry(oauth), {:state, state}) do
+      [{pid, _value}] -> Flow.finish(pid, params)
+      [] -> {:error, :no_such_flow}
+    end
+  end
+
+  def finish(_oauth, _params), do: {:error, :no_such_flow}
 
   @impl WardrikVault.Grants
   def ask(_vault, name, principal, oauth) do
