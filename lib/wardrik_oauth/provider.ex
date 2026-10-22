@@ -16,6 +16,9 @@ defmodule WardrikOAuth.Provider do
   `:flow` is `:browser` by default, signing in through a page that comes back to your app. `:device`
   signs in by entering a code on any device. `:authorization_params` are more to send with a
   browser sign-in, like Google's `%{"access_type" => "offline", "prompt" => "consent"}`.
+
+  `:client_auth` is how the client's secret is sent. `:post`, the default, sends it in the form.
+  `:basic` sends it in an HTTP Basic header, for a service that requires it, like Notion.
   """
 
   @derive {Inspect, except: [:client_secret]}
@@ -30,6 +33,7 @@ defmodule WardrikOAuth.Provider do
     :token_endpoint,
     scopes: [],
     flow: :browser,
+    client_auth: :post,
     authorization_params: %{}
   ]
 
@@ -44,6 +48,7 @@ defmodule WardrikOAuth.Provider do
           token_endpoint: String.t() | nil,
           scopes: [String.t()],
           flow: :browser | :device,
+          client_auth: :post | :basic,
           authorization_params: %{optional(String.t()) => String.t()}
         }
 
@@ -56,6 +61,7 @@ defmodule WardrikOAuth.Provider do
     :token_endpoint,
     scopes: [],
     flow: :browser,
+    client_auth: :post,
     authorization_params: %{}
   ]
 
@@ -68,6 +74,7 @@ defmodule WardrikOAuth.Provider do
       opts
       |> Keyword.validate!(@options)
       |> Keyword.update(:authorization_params, %{}, &params!/1)
+      |> Keyword.update!(:client_auth, &client_auth!/1)
 
     provider = struct!(__MODULE__, [name: to_string(name)] ++ opts)
 
@@ -87,6 +94,11 @@ defmodule WardrikOAuth.Provider do
 
   defp findable?(%__MODULE__{issuer: nil, resource: nil} = provider), do: endpoints?(provider)
   defp findable?(_provider), do: true
+
+  defp client_auth!(how) when how in [:post, :basic], do: how
+
+  defp client_auth!(how),
+    do: raise(ArgumentError, "client_auth is :post or :basic, not #{inspect(how)}")
 
   defp params!(params) do
     params = Map.new(params, fn {key, value} -> {to_string(key), to_string(value)} end)

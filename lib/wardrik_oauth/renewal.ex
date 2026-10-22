@@ -81,13 +81,12 @@ defmodule WardrikOAuth.Renewal do
 
   defp post_refresh(settings, provider, token) do
     form =
-      provider
-      |> Request.client_form()
+      %{}
       |> Map.merge(%{"grant_type" => "refresh_token", "refresh_token" => token.refresh_token})
       |> Request.present("resource", provider.resource)
 
     with {:ok, status, body} <-
-           Request.post_form(token.token_endpoint, form, settings.req_options),
+           Request.post_as(token.token_endpoint, provider, form, settings.req_options),
          do: Token.from_response(status, body, token.token_endpoint)
   end
 

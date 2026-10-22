@@ -63,6 +63,13 @@ defmodule WardrikOAuthTest do
            scopes: ["openid", "email"],
            authorization_params: %{access_type: "offline", prompt: "consent"}
          ],
+         notion: [
+           authorization_endpoint: "https://notion.test/v1/oauth/authorize",
+           token_endpoint: "https://notion.test/v1/oauth/token",
+           client_id: "notion client",
+           client_secret: "notion:secret",
+           client_auth: :basic
+         ],
          linear: [
            authorization_endpoint: "https://linear.test/oauth/authorize",
            token_endpoint: "https://linear.test/oauth/token",
@@ -130,7 +137,7 @@ defmodule WardrikOAuthTest do
     end
 
     test "asks nothing for a name it has no provider for", %{vault: vault} do
-      assert WardrikVault.resolve("notion", @jon, vault) == {:error, :not_found}
+      assert WardrikVault.resolve("asana", @jon, vault) == {:error, :not_found}
     end
 
     @tag polls: []
@@ -194,6 +201,24 @@ defmodule WardrikOAuthTest do
 
       assert {:ok, "linear"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
       assert_received {:exchanged, %{"client_id" => "linear-client"}}
+    end
+
+    test "sends the secret in the form by default", %{vault: vault, oauth: oauth} do
+      state = state(WardrikVault.resolve("linear", @jon, vault))
+      {:ok, "linear"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
+
+      assert_received {:exchanged, %{"client_secret" => "linear-secret"}}
+      assert_received {:client_auth, []}
+    end
+
+    test "sends the secret in a Basic header when the app asks", %{vault: vault, oauth: oauth} do
+      state = state(WardrikVault.resolve("notion", @jon, vault))
+      {:ok, "notion"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
+
+      assert_received {:exchanged, form}
+      refute Map.has_key?(form, "client_secret")
+      assert_received {:client_auth, ["Basic " <> encoded]}
+      assert Base.decode64!(encoded) == "notion+client:notion%3Asecret"
     end
 
     test "takes a code only from the issuer that promised to say so", %{

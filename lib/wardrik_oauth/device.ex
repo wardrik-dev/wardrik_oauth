@@ -33,12 +33,11 @@ defmodule WardrikOAuth.Device do
 
   def request(%Metadata{} = metadata, %Provider{} = provider, req_options) do
     form =
-      provider
-      |> Request.client_form()
+      %{}
       |> Request.present("scope", Enum.join(provider.scopes, " "))
       |> Request.present("resource", provider.resource)
 
-    case Request.post_form(metadata.device_authorization_endpoint, form, req_options) do
+    case Request.post_as(metadata.device_authorization_endpoint, provider, form, req_options) do
       {:ok, 200, body} -> read(body)
       {:ok, status, body} -> {:error, Request.refusal(status, body)}
       {:error, reason} -> {:error, reason}
@@ -49,13 +48,12 @@ defmodule WardrikOAuth.Device do
   @spec poll(Metadata.t(), Provider.t(), t(), keyword()) :: poll()
   def poll(%Metadata{} = metadata, %Provider{} = provider, %__MODULE__{} = device, req_options) do
     form =
-      provider
-      |> Request.client_form()
+      %{}
       |> Map.merge(%{"grant_type" => @grant, "device_code" => device.device_code})
       |> Request.present("resource", provider.resource)
 
     metadata.token_endpoint
-    |> Request.post_form(form, req_options)
+    |> Request.post_as(provider, form, req_options)
     |> polled(metadata.token_endpoint)
   end
 

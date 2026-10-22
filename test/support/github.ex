@@ -43,6 +43,7 @@ defmodule WardrikOAuth.GitHub do
 
   defp answer(conn, "POST", _path, %{"grant_type" => "authorization_code"} = form, _polls, test) do
     send(test, {:exchanged, form})
+    send(test, {:client_auth, Plug.Conn.get_req_header(conn, "authorization")})
 
     Req.Test.json(conn, %{
       "access_token" => "browser_token",

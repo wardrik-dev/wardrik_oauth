@@ -60,6 +60,31 @@ publishes none, like Linear, give `authorization_endpoint` and `token_endpoint` 
 `authorization_params` are sent with a browser sign-in. Google hands back a refresh token only
 when asked for `access_type: "offline"`.
 
+The client's secret is sent in the form by default. Some services, like Notion, want it in an HTTP
+Basic header instead, so set `client_auth: :basic`:
+
+```elixir
+notion: [
+  authorization_endpoint: "https://api.notion.com/v1/oauth/authorize",
+  token_endpoint: "https://api.notion.com/v1/oauth/token",
+  client_id: System.fetch_env!("NOTION_CLIENT_ID"),
+  client_secret: System.fetch_env!("NOTION_CLIENT_SECRET"),
+  client_auth: :basic,
+  authorization_params: %{owner: "user"}
+]
+```
+
+| Option | Takes | Unless set |
+| --- | --- | --- |
+| `issuer` | the authorization server, whose metadata names its endpoints | found from `resource` |
+| `resource` | the API or MCP server the token is for | not sent |
+| `authorization_endpoint`, `token_endpoint` | the endpoints, for a service that publishes no metadata | discovered |
+| `client_id`, `client_secret` | your OAuth app's | `client_id` is required |
+| `client_auth` | `:post` or `:basic`, how the secret is sent | `:post` |
+| `scopes` | what to ask for | none |
+| `flow` | `:browser` or `:device` | `:browser` |
+| `authorization_params` | more to send with a browser sign-in | none |
+
 ## Mount the pages
 
 A sign-in comes back to your app, so mount `WardrikOAuth.Plug` at `page`. In a Phoenix router:

@@ -57,8 +57,7 @@ defmodule WardrikOAuth.Browser do
           {:ok, Token.t()} | {:error, term()}
   def exchange(%Metadata{} = metadata, %Provider{} = provider, code, verifier, opts) do
     form =
-      provider
-      |> Request.client_form()
+      %{}
       |> Map.merge(%{
         "grant_type" => "authorization_code",
         "code" => code,
@@ -68,7 +67,12 @@ defmodule WardrikOAuth.Browser do
       |> Request.present("resource", provider.resource)
 
     with {:ok, status, body} <-
-           Request.post_form(metadata.token_endpoint, form, Keyword.fetch!(opts, :req_options)),
+           Request.post_as(
+             metadata.token_endpoint,
+             provider,
+             form,
+             Keyword.fetch!(opts, :req_options)
+           ),
          do: Token.from_response(status, body, metadata.token_endpoint)
   end
 

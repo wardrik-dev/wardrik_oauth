@@ -35,6 +35,12 @@ defmodule WardrikOAuth.PartsTest do
     end
   end
 
+  test "sends a secret in the form or a Basic header, and no other way" do
+    assert_raise ArgumentError, ~r/client_auth is :post or :basic/, fn ->
+      Provider.new(:test, issuer: @issuer, client_id: "client", client_auth: :jwt)
+    end
+  end
+
   test "keeps the params a browser sign-in sets itself" do
     assert_raise ArgumentError, ~r/can't set/, fn ->
       Provider.new(:test,
