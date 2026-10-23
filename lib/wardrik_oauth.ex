@@ -103,9 +103,15 @@ defmodule WardrikOAuth do
   @spec flow(atom(), String.t()) :: {:ok, map()} | :error
   def flow(oauth, id) do
     case Registry.lookup(registry(oauth), {:id, id}) do
-      [{pid, _value}] -> {:ok, Flow.describe(pid)}
+      [{pid, _value}] -> described(pid)
       [] -> :error
     end
+  end
+
+  defp described(pid) do
+    {:ok, Flow.describe(pid)}
+  catch
+    :exit, _ended -> :error
   end
 
   @doc """
@@ -116,12 +122,18 @@ defmodule WardrikOAuth do
   @spec finish(atom(), map()) :: {:ok, String.t()} | {:error, term()}
   def finish(oauth, %{"state" => state} = params) when is_binary(state) do
     case Registry.lookup(registry(oauth), {:state, state}) do
-      [{pid, _value}] -> Flow.finish(pid, params)
+      [{pid, _value}] -> finished(pid, params)
       [] -> {:error, :no_such_flow}
     end
   end
 
   def finish(_oauth, _params), do: {:error, :no_such_flow}
+
+  defp finished(pid, params) do
+    Flow.finish(pid, params)
+  catch
+    :exit, _ended -> {:error, :no_such_flow}
+  end
 
   @impl WardrikVault.Grants
   def ask(_vault, name, principal, oauth) do
@@ -194,6 +206,11 @@ defmodule WardrikOAuth do
   defp settings(oauth) do
     {:ok, settings} = Registry.meta(registry(oauth), :settings)
     settings
+  rescue
+    ArgumentError ->
+      reraise ArgumentError,
+              "#{inspect(oauth)} isn't started. Add {WardrikOAuth, name: #{inspect(oauth)}, ...} to your supervision tree, ahead of what uses it.",
+              __STACKTRACE__
   end
 
   defp registry(oauth), do: Module.concat(oauth, Registry)

@@ -94,7 +94,12 @@ MCP server's own authorization server expects:
 
 ```elixir
 :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
-{:ok, url} = WardrikOAuth.authorize(MyApp.OAuth, "linear", maria)
+WardrikOAuth.authorize(MyApp.OAuth, "linear", maria)
+#=> {:ok, "https://mcp.linear.app/authorize?client_id=...&state=..."}
+
+WardrikOAuth.providers(MyApp.OAuth)
+#=> ["github", "google", "linear"]
+
 
 :ok = WardrikOAuth.remove_provider(MyApp.OAuth, "linear")
 ```

@@ -101,6 +101,12 @@ defmodule WardrikOAuthTest do
   defp token(fields),
     do: struct!(Token, [token_endpoint: "https://github.test/login/oauth/access_token"] ++ fields)
 
+  test "says which sign-ins aren't started" do
+    assert_raise ArgumentError, ~r/^MyApp.Missing isn't started/, fn ->
+      WardrikOAuth.providers(MyApp.Missing)
+    end
+  end
+
   describe "providers added as the app runs" do
     test "registers Wardrik with a service once, and signs in through it", %{oauth: oauth} do
       assert :ok =
