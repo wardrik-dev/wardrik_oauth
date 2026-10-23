@@ -114,8 +114,8 @@ WardrikCore.start_agent(
 )
 ```
 
-The first call that needs `github` before Jon has signed in waits on a sign-in. Once he has,
-`on_granted` gets the provider's name and his principal. Resume the agents waiting on it there:
+The first call that needs `github` before Jon has signed in waits on a sign-in. Once Jon has,
+`on_granted` gets the provider's name and Jon's principal. Resume the agents waiting on it there:
 
 ```elixir
 defmodule MyApp.SignIns do
