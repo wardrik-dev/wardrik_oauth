@@ -1,11 +1,6 @@
 defmodule WardrikOAuth.Browser do
   @moduledoc """
-  A browser flow signs a principal in on the service's page, which sends them back to your app.
-
-  It's the authorization code flow with PKCE. `start/3` builds the URL to send the principal to,
-  with a `state` that finds the sign-in again, and a verifier only this side knows. `exchange/5`
-  turns the code they come back with into a token. A server that says it sends `iss` (RFC 9207)
-  must name its own issuer, or the code isn't taken.
+  A browser flow signs a principal in on the service's page, with the authorization code flow and PKCE.
   """
 
   alias WardrikOAuth.Metadata

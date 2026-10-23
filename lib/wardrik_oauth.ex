@@ -3,33 +3,14 @@ defmodule WardrikOAuth do
   OAuth sign-in for WardrikCore agents, with the grants kept sealed in a `WardrikVault`.
 
       children = [
-        {WardrikStore, store},
         {WardrikVault, name: MyApp.Vault, store: store, keys: keys, grants: {WardrikOAuth, MyApp.OAuth}},
         {WardrikOAuth,
          name: MyApp.OAuth,
          vault: MyApp.Vault,
          page: "https://agents.example.com/oauth",
          on_granted: {MyApp.Agents, :granted, []},
-         providers: [
-           github: [
-             issuer: "https://github.com/login/oauth",
-             client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
-             client_secret: System.fetch_env!("GITHUB_CLIENT_SECRET"),
-             scopes: ~w(repo)
-           ]
-         ]}
+         providers: [github: [issuer: "https://github.com/login/oauth", client_id: id, client_secret: secret]]}
       ]
-
-  Mount `WardrikOAuth.Plug` at `page` in your app's router. A tool that needs `github`, for a
-  principal who hasn't authorized it, parks on a sign-in URL. In a browser sign-in, that's the
-  service's own page, which sends them back to `page` followed by `/callback`. In a device sign-in,
-  it's `page` followed by `/device/<id>`, which shows a code to enter. Once they've authorized,
-  `on_granted` is called with the provider's name and the principal, so your app can resume the
-  turns waiting on it.
-
-  A grant that has expired is refreshed before anyone is asked again. See `WardrikOAuth.Renewal`.
-
-  Reach for this when tools should act as each person, with their own account.
   """
 
   @behaviour WardrikVault.Grants

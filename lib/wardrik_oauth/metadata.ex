@@ -1,10 +1,6 @@
 defmodule WardrikOAuth.Metadata do
   @moduledoc """
-  Metadata is what an authorization server says about itself, found from its issuer.
-
-  With an issuer, it's read from RFC 8414's well-known path, then OpenID's. Without one, the issuer
-  is found first from the resource's metadata, RFC 9728. The answer must name the issuer it was
-  asked about. A provider that names its own endpoints skips all of this.
+  Metadata is what an authorization server says about itself, found from its issuer or resource.
   """
 
   alias WardrikOAuth.Provider

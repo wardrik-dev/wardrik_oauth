@@ -3,9 +3,6 @@ defmodule WardrikOAuth.Plug do
   The pages a sign-in comes back to, for your app's router to mount at `WardrikOAuth`'s `page`.
 
       forward "/oauth", WardrikOAuth.Plug, oauth: MyApp.OAuth
-
-  `GET /callback` finishes a browser sign-in. Register `page` followed by `/callback` as the
-  redirect URI of each OAuth app. `GET /device/:id` shows a device sign-in's code.
   """
 
   @behaviour Plug

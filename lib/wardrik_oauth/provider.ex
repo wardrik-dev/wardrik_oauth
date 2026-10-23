@@ -1,24 +1,6 @@
 defmodule WardrikOAuth.Provider do
   @moduledoc """
   A provider is an OAuth app you registered with a service, named like the credential it grants.
-
-      github: [
-        issuer: "https://github.com/login/oauth",
-        client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
-        client_secret: System.fetch_env!("GITHUB_CLIENT_SECRET"),
-        scopes: ~w(repo)
-      ]
-
-  Its endpoints are found from the `:issuer`'s metadata, or from a `:resource` whose metadata names
-  the issuer. For a service that publishes none, give `:authorization_endpoint` and
-  `:token_endpoint` instead.
-
-  `:flow` is `:browser` by default, signing in through a page that comes back to your app. `:device`
-  signs in by entering a code on any device. `:authorization_params` are more to send with a
-  browser sign-in, like Google's `%{"access_type" => "offline", "prompt" => "consent"}`.
-
-  `:client_auth` is how the client's secret is sent. `:post`, the default, sends it in the form.
-  `:basic` sends it in an HTTP Basic header, for a service that requires it, like Notion.
   """
 
   @derive {Inspect, except: [:client_secret]}
