@@ -12,6 +12,7 @@ defmodule WardrikOAuth.Flow do
   alias WardrikOAuth.Device
   alias WardrikOAuth.Metadata
   alias WardrikOAuth.Provider
+  alias WardrikOAuth.Registration
   alias WardrikOAuth.Token
 
   @lifetime :timer.minutes(15)
@@ -45,6 +46,7 @@ defmodule WardrikOAuth.Flow do
   @impl GenServer
   def init({settings, provider, principal}) do
     with {:ok, metadata} <- Metadata.discover(provider, settings.req_options),
+         {:ok, provider} <- Registration.client(settings, provider, metadata),
          flow = %{
            settings: settings,
            provider: provider,

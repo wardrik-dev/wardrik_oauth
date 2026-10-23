@@ -37,6 +37,18 @@ defmodule WardrikOAuth.Request do
     end
   end
 
+  @doc "Posts `body` to `url` as JSON, and returns the status with the JSON it answered."
+  @spec post_json(String.t(), map(), keyword()) :: {:ok, pos_integer(), map()} | {:error, term()}
+  def post_json(url, body, req_options) do
+    with :ok <- secure(url) do
+      case Req.post(url, [json: body] ++ options(req_options)) do
+        {:ok, %Req.Response{status: status, body: %{} = answer}} -> {:ok, status, answer}
+        {:ok, %Req.Response{status: status}} -> {:ok, status, %{}}
+        {:error, reason} -> {:error, {:unreachable, reason}}
+      end
+    end
+  end
+
   @doc "Reads an OAuth error answer as `{:token_refused, error, description}`."
   @spec refusal(pos_integer(), map()) :: {:token_refused, String.t(), String.t() | nil}
   def refusal(status, body) do

@@ -43,6 +43,7 @@ defmodule WardrikOAuthTest do
       {WardrikOAuth,
        name: oauth,
        vault: vault,
+       store: store,
        page: "https://agents.test/oauth/",
        on_granted: {WardrikOAuth.TestHook, :granted, [test]},
        req_options: [plug: {Req.Test, GitHub}],
@@ -99,6 +100,51 @@ defmodule WardrikOAuthTest do
 
   defp token(fields),
     do: struct!(Token, [token_endpoint: "https://github.test/login/oauth/access_token"] ++ fields)
+
+  describe "providers added as the app runs" do
+    test "registers Wardrik with a service once, and signs in through it", %{oauth: oauth} do
+      assert :ok =
+               WardrikOAuth.add_provider(oauth, "tracker",
+                 resource: "https://api.github.test/mcp/"
+               )
+
+      assert "tracker" in WardrikOAuth.providers(oauth)
+
+      assert {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @jon)
+      assert URI.decode_query(URI.parse(url).query)["client_id"] == "registered-client"
+
+      assert_receive {:registered,
+                      %{
+                        "client_name" => "Wardrik",
+                        "redirect_uris" => ["https://agents.test/oauth/callback"],
+                        "token_endpoint_auth_method" => "none"
+                      }}
+
+      assert {:ok, _url} = WardrikOAuth.authorize(oauth, "tracker", %Principal{id: "user:ada"})
+      refute_received {:registered, _request}
+    end
+
+    test "says why a provider doesn't read, or can't be signed in with", %{oauth: oauth} do
+      assert {:error, "github is a provider the app starts with"} =
+               WardrikOAuth.add_provider(oauth, "github",
+                 resource: "https://api.github.test/mcp/"
+               )
+
+      assert {:error, "The nowhere provider needs" <> _} =
+               WardrikOAuth.add_provider(oauth, "nowhere", [])
+
+      assert :ok = WardrikOAuth.add_provider(oauth, "accounts", issuer: "https://accounts.test")
+      assert {:error, {:no_client, "accounts"}} = WardrikOAuth.authorize(oauth, "accounts", @jon)
+    end
+
+    test "forgets a provider it's told to", %{oauth: oauth} do
+      :ok = WardrikOAuth.add_provider(oauth, "tracker", resource: "https://api.github.test/mcp/")
+
+      assert :ok = WardrikOAuth.remove_provider(oauth, "tracker")
+      refute "tracker" in WardrikOAuth.providers(oauth)
+      assert {:error, :not_found} = WardrikOAuth.authorize(oauth, "tracker", @jon)
+    end
+  end
 
   describe "signing in on another device" do
     @tag polls: [%{"error" => "authorization_pending"}, @granted]

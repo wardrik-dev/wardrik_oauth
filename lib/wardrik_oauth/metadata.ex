@@ -12,6 +12,7 @@ defmodule WardrikOAuth.Metadata do
     :token_endpoint,
     :authorization_endpoint,
     :device_authorization_endpoint,
+    :registration_endpoint,
     iss_supported?: false
   ]
 
@@ -21,6 +22,7 @@ defmodule WardrikOAuth.Metadata do
           token_endpoint: String.t(),
           authorization_endpoint: String.t() | nil,
           device_authorization_endpoint: String.t() | nil,
+          registration_endpoint: String.t() | nil,
           iss_supported?: boolean()
         }
 
@@ -78,6 +80,7 @@ defmodule WardrikOAuth.Metadata do
        token_endpoint: token_endpoint,
        authorization_endpoint: body["authorization_endpoint"],
        device_authorization_endpoint: body["device_authorization_endpoint"],
+       registration_endpoint: body["registration_endpoint"],
        iss_supported?: body["authorization_response_iss_parameter_supported"] == true
      }}
   end

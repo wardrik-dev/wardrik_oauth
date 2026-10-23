@@ -1,10 +1,11 @@
 defmodule WardrikOAuth.Provider do
   @moduledoc """
-  A provider is an OAuth app you registered with a service, named like the credential it grants.
+  A provider is an OAuth app with a service, named like the credential it grants: one you
+  registered, with its `client_id`, or one Wardrik registers itself, where the service lets it.
   """
 
   @derive {Inspect, except: [:client_secret]}
-  @enforce_keys [:name, :client_id]
+  @enforce_keys [:name]
   defstruct [
     :name,
     :issuer,
@@ -24,7 +25,7 @@ defmodule WardrikOAuth.Provider do
           name: String.t(),
           issuer: String.t() | nil,
           resource: String.t() | nil,
-          client_id: String.t(),
+          client_id: String.t() | nil,
           client_secret: String.t() | nil,
           authorization_endpoint: String.t() | nil,
           token_endpoint: String.t() | nil,

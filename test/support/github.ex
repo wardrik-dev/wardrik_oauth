@@ -9,6 +9,7 @@ defmodule WardrikOAuth.GitHub do
     fn conn ->
       conn = Plug.Conn.fetch_query_params(conn)
       {:ok, body, conn} = Plug.Conn.read_body(conn)
+      conn = Plug.Conn.assign(conn, :body, body)
       answer(conn, conn.method, conn.request_path, URI.decode_query(body), polls, test)
     end
   end
@@ -29,6 +30,7 @@ defmodule WardrikOAuth.GitHub do
       "token_endpoint" => "https://github.test/login/oauth/access_token",
       "authorization_endpoint" => "https://github.test/login/oauth/authorize",
       "device_authorization_endpoint" => "https://github.test/login/device/code",
+      "registration_endpoint" => "https://github.test/register",
       "authorization_response_iss_parameter_supported" => true
     })
   end
@@ -50,6 +52,11 @@ defmodule WardrikOAuth.GitHub do
       "refresh_token" => "rt",
       "expires_in" => 3600
     })
+  end
+
+  defp answer(conn, "POST", "/register", _form, _polls, test) do
+    send(test, {:registered, JSON.decode!(conn.assigns.body)})
+    conn |> Plug.Conn.put_status(201) |> Req.Test.json(%{"client_id" => "registered-client"})
   end
 
   defp answer(conn, "POST", "/login/device/code", _form, _polls, _test) do

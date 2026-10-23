@@ -19,24 +19,84 @@ defmodule WardrikOAuth do
 
   alias WardrikOAuth.Flow
   alias WardrikOAuth.Provider
+  alias WardrikOAuth.Registration
   alias WardrikOAuth.Renewal
   alias WardrikOAuth.Token
 
-  @doc "Starts the sign-ins. Takes `:name`, `:vault`, `:page`, `:providers`, `:on_granted` and `:req_options`."
+  @doc """
+  Starts the sign-ins. Takes `:name`, `:vault`, `:store`, where providers added as it runs are
+  kept, `:page`, `:providers`, `:on_granted`, `:client_name`, what a service shows of a client
+  Wardrik registers itself, `"Wardrik"` unless set, and `:req_options`.
+  """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
     opts =
       Keyword.validate!(opts, [
         :name,
         :vault,
+        :store,
         :page,
         providers: [],
         on_granted: nil,
+        client_name: "Wardrik",
         req_options: []
       ])
 
     name = Keyword.fetch!(opts, :name)
     Supervisor.start_link(__MODULE__, Map.new(opts), name: name)
+  end
+
+  @doc """
+  Adds the provider `name` as the app runs, on every node, as `:providers` takes one. Without a
+  `client_id`, Wardrik registers itself with the service the first time someone signs in.
+
+      :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
+  """
+  @spec add_provider(atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def add_provider(oauth, name, opts) when is_binary(name) do
+    settings = settings(oauth)
+    Provider.new(name, opts)
+
+    if Map.has_key?(settings.providers, name) do
+      {:error, "#{name} is a provider the app starts with"}
+    else
+      with {:ok, _vsn} <- WardrikStore.put(settings.store, provider_key(name), opts), do: :ok
+    end
+  rescue
+    error in ArgumentError -> {:error, Exception.message(error)}
+  end
+
+  @doc "Removes the provider `name` added as the app ran, and the client registered for it."
+  @spec remove_provider(atom(), String.t()) :: :ok | {:error, term()}
+  def remove_provider(oauth, name) do
+    settings = settings(oauth)
+
+    with :ok <- WardrikStore.delete(settings.store, provider_key(name)),
+         do: Registration.forget(settings, name)
+  end
+
+  @doc "Returns the names of the providers someone can sign in with."
+  @spec providers(atom()) :: [String.t()]
+  def providers(oauth) do
+    settings = settings(oauth)
+
+    added =
+      settings.store
+      |> WardrikStore.keys("providers/")
+      |> Enum.map(&String.replace_prefix(&1, "providers/", ""))
+
+    Enum.sort(Map.keys(settings.providers) ++ added)
+  end
+
+  @doc "Returns where `principal` signs in with the provider `name`, starting a sign-in unless one is under way."
+  @spec authorize(atom(), String.t(), WardrikCore.Principal.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def authorize(oauth, name, principal) do
+    settings = settings(oauth)
+
+    with {:ok, provider} <- provider(settings, name),
+         {:authorize, url} <- Flow.begin(settings, provider, principal),
+         do: {:ok, url}
   end
 
   @doc "Describes the device sign-in `id` names, with the code to enter and where, or returns `:error`."
@@ -110,6 +170,8 @@ defmodule WardrikOAuth do
   def init(opts) do
     settings = %{
       vault: Map.fetch!(opts, :vault),
+      store: opts |> Map.fetch!(:store) |> WardrikStore.scope("wardrik_oauth"),
+      client_name: opts.client_name,
       page: opts |> Map.fetch!(:page) |> String.trim_trailing("/"),
       providers:
         Map.new(opts.providers, fn {name, provider} ->
@@ -138,10 +200,19 @@ defmodule WardrikOAuth do
 
   defp provider(settings, name) do
     case Map.fetch(settings.providers, name) do
-      {:ok, provider} -> {:ok, provider}
-      :error -> {:error, :not_found}
+      {:ok, provider} -> {:ok, Registration.registered(settings, provider)}
+      :error -> added(settings, name)
     end
   end
+
+  defp added(settings, name) do
+    case WardrikStore.get(settings.store, provider_key(name)) do
+      nil -> {:error, :not_found}
+      opts -> {:ok, Registration.registered(settings, Provider.new(name, opts))}
+    end
+  end
+
+  defp provider_key(name), do: "providers/" <> name
 
   defp over_current(vault, principal, name) do
     case WardrikVault.lookup(vault, principal, name) do

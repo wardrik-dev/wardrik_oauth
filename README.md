@@ -25,6 +25,7 @@ children = [
   {WardrikOAuth,
    name: MyApp.OAuth,
    vault: MyApp.Vault,
+   store: store,
    page: "https://agents.example.com/oauth",
    on_granted: {MyApp.Agents, :granted, []},
    providers: [
@@ -79,11 +80,27 @@ notion: [
 | `issuer` | the authorization server, whose metadata names its endpoints | found from `resource` |
 | `resource` | the API or MCP server the token is for | not sent |
 | `authorization_endpoint`, `token_endpoint` | the endpoints, for a service that publishes no metadata | discovered |
-| `client_id`, `client_secret` | your OAuth app's | `client_id` is required |
+| `client_id`, `client_secret` | your OAuth app's | registered by Wardrik, where the service allows |
 | `client_auth` | `:post` or `:basic`, how the secret is sent | `:post` |
 | `scopes` | what to ask for | none |
 | `flow` | `:browser` or `:device` | `:browser` |
 | `authorization_params` | more to send with a browser sign-in | none |
+
+## Add providers as the app runs
+
+A provider can be added while the app runs, and every node sees it. One without a `client_id`
+registers Wardrik with the service the first time someone signs in, as RFC 7591 says, the way an
+MCP server's own authorization server expects:
+
+```elixir
+:ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
+{:ok, url} = WardrikOAuth.authorize(MyApp.OAuth, "linear", maria)
+
+:ok = WardrikOAuth.remove_provider(MyApp.OAuth, "linear")
+```
+
+The registration is kept in the store, so it happens once. `client_name` names Wardrik on the
+service's page, `"Wardrik"` unless set. `providers/1` lists the providers someone can sign in with.
 
 ## Mount the pages
 
