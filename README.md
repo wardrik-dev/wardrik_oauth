@@ -27,7 +27,7 @@ children = [
    vault: MyApp.Vault,
    store: store,
    page: "https://agents.example.com/oauth",
-   on_granted: {MyApp.Agents, :granted, []},
+   on_granted: {MyApp.SignIns, :granted, []},
    providers: [
      google: [
        issuer: "https://accounts.google.com",
@@ -85,6 +85,67 @@ notion: [
 | `scopes` | what to ask for | none |
 | `flow` | `:browser` or `:device` | `:browser` |
 | `authorization_params` | more to send with a browser sign-in | none |
+
+## Give it to agents
+
+An agent reads its principal's grants through the vault, as its `credentials`. A tool asks for the
+credential by the provider's name, like an MCP server's `credential_name`:
+
+```elixir
+children = [
+  # ...the store, vault and WardrikOAuth above, then:
+  {WardrikMCP,
+   name: MyApp.MCP,
+   servers: [
+     github: [
+       transport: {:streamable_http, base_url: "https://api.githubcopilot.com/mcp/"},
+       credential_name: "github"
+     ]
+   ]},
+  {WardrikCore, backend: {WardrikStore.Durable, store: store}}
+]
+
+WardrikCore.start_agent(
+  agent_id: "acme/@jon/digest",
+  model: "anthropic:claude-haiku-4-5",
+  principal: %WardrikCore.Principal{id: "acme/@jon"},
+  credentials: {WardrikVault, MyApp.Vault},
+  capabilities: [{WardrikMCP, name: MyApp.MCP, servers: [:github]}]
+)
+```
+
+The first call that needs `github` before Jon has signed in waits on a sign-in. Once he has,
+`on_granted` gets the provider's name and his principal. Resume the agents waiting on it there:
+
+```elixir
+defmodule MyApp.SignIns do
+  alias WardrikCore.Authorization
+
+  def granted(provider, principal) do
+    WardrikCore.list()
+    |> Enum.map(&WardrikCore.whereis/1)
+    |> Enum.filter(&waits_on?(&1, to_string(provider), principal))
+    |> Enum.each(&WardrikCore.resume(&1, %{}, %{principal: principal}))
+  end
+
+  defp waits_on?(nil, _credential, _principal), do: false
+
+  defp waits_on?(agent, credential, principal) do
+    case WardrikCore.parked(agent) do
+      {:tool_calls, results} -> Enum.any?(results, &signs_in?(&1, credential, principal))
+      _reason -> false
+    end
+  end
+
+  defp signs_in?({_call, {:park, %Authorization{credential: credential, principal: %{id: id}}}}, credential, %{id: id}),
+    do: true
+
+  defp signs_in?(_result, _credential, _principal), do: false
+end
+```
+
+With [Wardrik](https://hexdocs.pm/wardrik), all of this is done for you. See
+[Credentials and sign-ins](https://hexdocs.pm/wardrik/credentials.html).
 
 ## Add providers as the app runs
 
