@@ -7,6 +7,7 @@ defmodule WardrikOAuth.Registration do
   7591 says.
   """
 
+  alias WardrikOAuth.ClientSecrets
   alias WardrikOAuth.Metadata
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Request
@@ -21,7 +22,7 @@ defmodule WardrikOAuth.Registration do
   def client(settings, provider, metadata) do
     case WardrikStore.get(settings.store, key(provider.name)) do
       nil -> register(settings, provider, metadata)
-      registered -> {:ok, applied(provider, registered)}
+      registered -> {:ok, applied(settings, provider, registered)}
     end
   end
 
@@ -32,13 +33,16 @@ defmodule WardrikOAuth.Registration do
   def registered(settings, provider) do
     case WardrikStore.get(settings.store, key(provider.name)) do
       nil -> provider
-      registered -> applied(provider, registered)
+      registered -> applied(settings, provider, registered)
     end
   end
 
   @doc "Forgets the client registered for the provider `name`."
   @spec forget(map(), String.t()) :: :ok | {:error, term()}
-  def forget(settings, name), do: WardrikStore.delete(settings.store, key(name))
+  def forget(settings, name) do
+    with :ok <- WardrikStore.delete(settings.store, key(name)),
+         do: ClientSecrets.forget(settings, key(name))
+  end
 
   @doc "Returns the Client ID Metadata Document the sign-in pages serve, at `{page}/client`."
   @spec document(map()) :: map()
@@ -70,11 +74,18 @@ defmodule WardrikOAuth.Registration do
   end
 
   defp kept(settings, provider, registered) do
-    case WardrikStore.put(settings.store, key(provider.name), registered, if_vsn: nil) do
-      {:ok, _vsn} -> {:ok, applied(provider, registered)}
+    {secret, client} = Map.pop(registered, "client_secret")
+
+    case WardrikStore.put(settings.store, key(provider.name), client, if_vsn: nil) do
+      {:ok, _vsn} -> sealed(settings, provider, client["client_id"], secret)
       {:error, :conflict} -> {:ok, registered(settings, provider)}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp sealed(settings, provider, id, secret) do
+    with :ok <- ClientSecrets.seal(settings, key(provider.name), secret),
+         do: {:ok, applied(provider, id, secret)}
   end
 
   defp request(settings, provider), do: fields(settings, grant_types(provider.flow))
@@ -92,12 +103,10 @@ defmodule WardrikOAuth.Registration do
   defp grant_types(:device), do: [@device, "refresh_token"]
   defp grant_types(:browser), do: ["authorization_code", "refresh_token"]
 
-  defp applied(provider, registered),
-    do: %{
-      provider
-      | client_id: registered["client_id"],
-        client_secret: registered["client_secret"]
-    }
+  defp applied(settings, provider, %{"client_id" => id}),
+    do: applied(provider, id, ClientSecrets.unseal(settings, key(provider.name)))
+
+  defp applied(provider, id, secret), do: %{provider | client_id: id, client_secret: secret}
 
   defp document_url(settings), do: settings.page <> "/client"
 

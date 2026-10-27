@@ -17,6 +17,7 @@ defmodule WardrikOAuth do
 
   use Supervisor
 
+  alias WardrikOAuth.ClientSecrets
   alias WardrikOAuth.Flow
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Registration
@@ -53,10 +54,11 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Adds the provider `name` as the app runs, on every node, as `:providers` takes one. Without a
-  `client_id`, Wardrik becomes the service's client the first time someone signs in: by the URL of
-  the document `WardrikOAuth.Plug` serves, where the service reads Client ID Metadata Documents and
-  `page` is `https`, else by registering itself.
+  Adds the provider `name` as the app runs, on every node, as `:providers` takes one. Its
+  `client_secret`, and that of a client Wardrik registers, is sealed in the vault, never kept in the
+  store. Without a `client_id`, Wardrik becomes the service's client the first time someone signs
+  in: by the URL of the document `WardrikOAuth.Plug` serves, where the service reads Client ID
+  Metadata Documents and `page` is `https`, else by registering itself.
 
       :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
   """
@@ -64,11 +66,14 @@ defmodule WardrikOAuth do
   def add_provider(oauth, name, opts) when is_binary(name) do
     settings = settings(oauth)
     Provider.new(name, opts)
+    {secret, kept} = Keyword.pop(opts, :client_secret)
 
     if Map.has_key?(settings.providers, name) do
       {:error, "#{name} is a provider the app starts with"}
     else
-      with {:ok, _vsn} <- WardrikStore.put(settings.store, provider_key(name), opts), do: :ok
+      with :ok <- ClientSecrets.seal(settings, provider_key(name), secret),
+           {:ok, _vsn} <- WardrikStore.put(settings.store, provider_key(name), kept),
+           do: :ok
     end
   rescue
     error in ArgumentError -> {:error, Exception.message(error)}
@@ -87,6 +92,7 @@ defmodule WardrikOAuth do
     settings = settings(oauth)
 
     with :ok <- WardrikStore.delete(settings.store, provider_key(name)),
+         :ok <- ClientSecrets.forget(settings, provider_key(name)),
          do: Registration.forget(settings, name)
   end
 
@@ -242,8 +248,19 @@ defmodule WardrikOAuth do
 
   defp added(settings, name) do
     case WardrikStore.get(settings.store, provider_key(name)) do
-      nil -> {:error, :not_found}
-      opts -> {:ok, Registration.registered(settings, Provider.new(name, opts))}
+      nil ->
+        {:error, :not_found}
+
+      opts ->
+        {:ok,
+         Registration.registered(settings, Provider.new(name, unsealed(settings, name, opts)))}
+    end
+  end
+
+  defp unsealed(settings, name, opts) do
+    case ClientSecrets.unseal(settings, provider_key(name)) do
+      nil -> opts
+      secret -> Keyword.put(opts, :client_secret, secret)
     end
   end
 

@@ -73,7 +73,13 @@ defmodule WardrikOAuth.GitHub do
 
   defp answer(conn, "POST", "/register", _form, _polls, test) do
     send(test, {:registered, JSON.decode!(conn.assigns.body)})
-    conn |> Plug.Conn.put_status(201) |> Req.Test.json(%{"client_id" => "registered-client"})
+
+    conn
+    |> Plug.Conn.put_status(201)
+    |> Req.Test.json(%{
+      "client_id" => "registered-client",
+      "client_secret" => "registered-secret"
+    })
   end
 
   defp answer(conn, "POST", "/login/device/code", _form, _polls, _test) do

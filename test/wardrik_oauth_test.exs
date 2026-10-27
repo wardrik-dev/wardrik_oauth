@@ -81,7 +81,7 @@ defmodule WardrikOAuthTest do
        ]}
     )
 
-    %{vault: vault, oauth: oauth}
+    %{vault: vault, oauth: oauth, store: WardrikStore.scope(store, "wardrik_oauth")}
   end
 
   defp get(oauth, path) do
@@ -108,6 +108,58 @@ defmodule WardrikOAuthTest do
   end
 
   describe "providers added as the app runs" do
+    test "keep an app's client secret sealed in the vault, and send it on exchange", %{
+      oauth: oauth,
+      vault: vault,
+      store: store
+    } do
+      assert :ok =
+               WardrikOAuth.add_provider(oauth, "acme/crm",
+                 issuer: GitHub.issuer(),
+                 client_id: "acme-app",
+                 client_secret: "acme-app-secret"
+               )
+
+      refute Keyword.has_key?(WardrikStore.get(store, "providers/acme/crm"), :client_secret)
+      refute inspect(WardrikStore.get(store, "providers/acme/crm")) =~ "acme-app-secret"
+
+      {:ok, url} = WardrikOAuth.authorize(oauth, "acme/crm", @jon)
+      assert URI.decode_query(URI.parse(url).query)["client_id"] == "acme-app"
+
+      {:ok, "acme/crm"} =
+        WardrikOAuth.finish(oauth, %{
+          "state" => state({:authorize, url}),
+          "code" => "c",
+          "iss" => GitHub.issuer()
+        })
+
+      assert_received {:exchanged,
+                       %{"client_id" => "acme-app", "client_secret" => "acme-app-secret"}}
+
+      :ok = WardrikOAuth.remove_provider(oauth, "acme/crm")
+
+      assert WardrikOAuth.ClientSecrets.unseal(%{vault: vault}, "providers/acme/crm") ==
+               nil
+    end
+
+    test "keep a registered client's secret sealed in the vault", %{oauth: oauth, store: store} do
+      :ok = WardrikOAuth.add_provider(oauth, "tracker", resource: "https://api.github.test/mcp/")
+      {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @jon)
+
+      assert WardrikStore.get(store, "registrations/tracker") == %{
+               "client_id" => "registered-client"
+             }
+
+      {:ok, "tracker"} =
+        WardrikOAuth.finish(oauth, %{
+          "state" => state({:authorize, url}),
+          "code" => "c",
+          "iss" => GitHub.issuer()
+        })
+
+      assert_received {:exchanged, %{"client_secret" => "registered-secret"}}
+    end
+
     test "registers Wardrik with a service once, and signs in through it", %{oauth: oauth} do
       assert :ok =
                WardrikOAuth.add_provider(oauth, "tracker",
