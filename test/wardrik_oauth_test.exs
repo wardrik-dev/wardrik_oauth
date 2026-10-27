@@ -130,6 +130,64 @@ defmodule WardrikOAuthTest do
       refute_received {:registered, _request}
     end
 
+    test "is the client of a service that reads its document by the document's URL", %{
+      oauth: oauth
+    } do
+      :ok = WardrikOAuth.add_provider(oauth, "documents", issuer: "https://documents.test")
+
+      assert {:ok, url} = WardrikOAuth.authorize(oauth, "documents", @jon)
+
+      assert URI.decode_query(URI.parse(url).query)["client_id"] ==
+               "https://agents.test/oauth/client"
+
+      refute_received {:registered, _request}
+
+      state = state({:authorize, url})
+      assert get(oauth, "/callback?state=#{state}&code=c0de").status == 200
+      assert_receive {:exchanged, %{"client_id" => "https://agents.test/oauth/client"}}
+
+      conn = get(oauth, "/client")
+      assert conn.status == 200
+      assert ["application/json" <> _charset] = Plug.Conn.get_resp_header(conn, "content-type")
+
+      assert JSON.decode!(conn.resp_body) == %{
+               "client_id" => "https://agents.test/oauth/client",
+               "client_name" => "Wardrik",
+               "redirect_uris" => ["https://agents.test/oauth/callback"],
+               "grant_types" => [
+                 "authorization_code",
+                 "urn:ietf:params:oauth:grant-type:device_code",
+                 "refresh_token"
+               ],
+               "response_types" => ["code"],
+               "token_endpoint_auth_method" => "none"
+             }
+    end
+
+    test "registers itself where its pages aren't served where a service could read them",
+         %{vault: vault} do
+      store = WardrikStore.ETS.new(name: :local_store)
+      start_supervised!({WardrikStore, store}, id: :local_store)
+
+      start_supervised!(
+        {WardrikOAuth,
+         name: :local_oauth,
+         vault: vault,
+         store: store,
+         page: "http://localhost:4747/oauth",
+         req_options: [plug: {Req.Test, GitHub}]},
+        id: :local_oauth
+      )
+
+      :ok = WardrikOAuth.add_provider(:local_oauth, "documents", issuer: "https://documents.test")
+
+      assert {:ok, url} = WardrikOAuth.authorize(:local_oauth, "documents", @jon)
+      assert URI.decode_query(URI.parse(url).query)["client_id"] == "registered-client"
+
+      assert_received {:registered,
+                       %{"redirect_uris" => ["http://localhost:4747/oauth/callback"]}}
+    end
+
     test "says why a provider doesn't read, or can't be signed in with", %{oauth: oauth} do
       assert {:error, "github is a provider the app starts with"} =
                WardrikOAuth.add_provider(oauth, "github",

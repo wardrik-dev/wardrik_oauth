@@ -1,6 +1,7 @@
 defmodule WardrikOAuth.Plug do
   @moduledoc """
-  The pages a sign-in comes back to, for your app's router to mount at `WardrikOAuth`'s `page`.
+  The pages a sign-in comes back to, for your app's router to mount at `WardrikOAuth`'s `page`,
+  and the Client ID Metadata Document a service reads Wardrik's `client_id` from, at `client`.
 
       forward "/oauth", WardrikOAuth.Plug, oauth: MyApp.OAuth
   """
@@ -44,6 +45,13 @@ defmodule WardrikOAuth.Plug do
       :error ->
         page(conn, 404, "Sign-in not found", ended())
     end
+  end
+
+  def call(%Plug.Conn{method: "GET", path_info: ["client"]} = conn, oauth) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("cache-control", "public, max-age=3600")
+    |> send_resp(200, JSON.encode!(WardrikOAuth.client_document(oauth)))
   end
 
   def call(conn, _oauth), do: send_resp(conn, 404, "Not found")

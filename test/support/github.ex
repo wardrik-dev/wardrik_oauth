@@ -35,6 +35,23 @@ defmodule WardrikOAuth.GitHub do
     })
   end
 
+  defp answer(
+         %Plug.Conn{host: "documents.test"} = conn,
+         "GET",
+         "/.well-known/oauth-authorization-server",
+         _form,
+         _polls,
+         _test
+       ) do
+    Req.Test.json(conn, %{
+      "issuer" => "https://documents.test",
+      "token_endpoint" => "https://documents.test/token",
+      "authorization_endpoint" => "https://documents.test/authorize",
+      "registration_endpoint" => "https://github.test/register",
+      "client_id_metadata_document_supported" => true
+    })
+  end
+
   defp answer(conn, "GET", "/.well-known/openid-configuration", _form, _polls, _test) do
     Req.Test.json(conn, %{
       "issuer" => "https://accounts.test",

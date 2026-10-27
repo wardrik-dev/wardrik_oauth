@@ -80,7 +80,7 @@ notion: [
 | `issuer` | the authorization server, whose metadata names its endpoints | found from `resource` |
 | `resource` | the API or MCP server the token is for | not sent |
 | `authorization_endpoint`, `token_endpoint` | the endpoints, for a service that publishes no metadata | discovered |
-| `client_id`, `client_secret` | your OAuth app's | registered by Wardrik, where the service allows |
+| `client_id`, `client_secret` | your OAuth app's | Wardrik's own, where the service allows; see [Without a client ID](#without-a-client-id) |
 | `client_auth` | `:post` or `:basic`, how the secret is sent | `:post` |
 | `scopes` | what to ask for | none |
 | `flow` | `:browser` or `:device` | `:browser` |
@@ -184,12 +184,27 @@ In a `Plug.Router`, served by Bandit or Cowboy:
 forward "/oauth", to: WardrikOAuth.Plug, init_opts: [oauth: MyApp.OAuth]
 ```
 
-It serves two pages under `page`:
+It serves three pages under `page`:
 
 | Path | What it does |
 | --- | --- |
 | `/callback` | Finishes a browser sign-in. Register `page` followed by `/callback` as each OAuth app's redirect URI, like `https://agents.example.com/oauth/callback`. |
 | `/device/:id` | Shows a device sign-in's code, and where to enter it. |
+| `/client` | The Client ID Metadata Document a service reads Wardrik's `client_id` from. |
+
+### Without a client ID
+
+A provider given no `client_id`, as one an MCP server's owner adds by its URL, gets Wardrik's own
+the first time someone signs in, and every node keeps it:
+
+- Where the service reads Client ID Metadata Documents, as its metadata's
+  `client_id_metadata_document_supported` says, and `page` is `https` on a host the service can
+  reach, the `client_id` is the URL of the document at `/client`, as
+  `https://agents.example.com/oauth/client`. Nothing is registered, and the consent screen shows
+  `client_name`.
+- Otherwise Wardrik registers itself with the service's `registration_endpoint`, as RFC 7591 says.
+- With neither, signing in fails with `{:no_client, name}`, and the provider needs a `client_id` of
+  your own.
 
 To handle the callback in a route of your own, call `WardrikOAuth.finish/2` with its query
 parameters. It returns `{:ok, provider}` or `{:error, reason}`.

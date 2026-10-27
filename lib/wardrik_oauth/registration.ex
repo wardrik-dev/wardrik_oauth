@@ -1,7 +1,10 @@
 defmodule WardrikOAuth.Registration do
   @moduledoc """
-  Registers Wardrik as a client of an authorization server it has no `client_id` for, as RFC 7591
-  says, once, and keeps the registration in the store for every node.
+  Makes Wardrik a client of an authorization server it has no `client_id` for, once, and keeps the
+  client in the store for every node. Where the server reads Client ID Metadata Documents and the
+  sign-in pages are served over `https`, the `client_id` is the URL of the document the pages
+  serve, at `{page}/client`, and nothing is registered. Otherwise Wardrik registers itself, as RFC
+  7591 says.
   """
 
   alias WardrikOAuth.Metadata
@@ -37,10 +40,23 @@ defmodule WardrikOAuth.Registration do
   @spec forget(map(), String.t()) :: :ok | {:error, term()}
   def forget(settings, name), do: WardrikStore.delete(settings.store, key(name))
 
-  defp register(_settings, provider, %Metadata{registration_endpoint: nil}),
-    do: {:error, {:no_client, provider.name}}
+  @doc "Returns the Client ID Metadata Document the sign-in pages serve, at `{page}/client`."
+  @spec document(map()) :: map()
+  def document(settings) do
+    settings
+    |> fields(["authorization_code", @device, "refresh_token"])
+    |> Map.put("client_id", document_url(settings))
+  end
 
-  defp register(settings, provider, %Metadata{registration_endpoint: endpoint}) do
+  defp register(settings, provider, metadata) do
+    if metadata.documents_supported? and public?(settings.page),
+      do: kept(settings, provider, %{"client_id" => document_url(settings)}),
+      else: dynamic(settings, provider, metadata.registration_endpoint)
+  end
+
+  defp dynamic(_settings, provider, nil), do: {:error, {:no_client, provider.name}}
+
+  defp dynamic(settings, provider, endpoint) do
     case Request.post_json(endpoint, request(settings, provider), settings.req_options) do
       {:ok, status, %{"client_id" => _id} = answer} when status in [200, 201] ->
         kept(settings, provider, Map.take(answer, ["client_id", "client_secret"]))
@@ -61,11 +77,13 @@ defmodule WardrikOAuth.Registration do
     end
   end
 
-  defp request(settings, provider) do
+  defp request(settings, provider), do: fields(settings, grant_types(provider.flow))
+
+  defp fields(settings, grant_types) do
     %{
       "client_name" => settings.client_name,
       "redirect_uris" => [settings.page <> "/callback"],
-      "grant_types" => grant_types(provider.flow),
+      "grant_types" => grant_types,
       "response_types" => ["code"],
       "token_endpoint_auth_method" => "none"
     }
@@ -80,6 +98,15 @@ defmodule WardrikOAuth.Registration do
       | client_id: registered["client_id"],
         client_secret: registered["client_secret"]
     }
+
+  defp document_url(settings), do: settings.page <> "/client"
+
+  defp public?(page) do
+    case URI.parse(page) do
+      %URI{scheme: "https", host: host} -> host not in ["localhost", "127.0.0.1", "::1"]
+      _other -> false
+    end
+  end
 
   defp key(name), do: "registrations/" <> name
 end

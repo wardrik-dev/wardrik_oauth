@@ -13,7 +13,8 @@ defmodule WardrikOAuth.Metadata do
     :authorization_endpoint,
     :device_authorization_endpoint,
     :registration_endpoint,
-    iss_supported?: false
+    iss_supported?: false,
+    documents_supported?: false
   ]
 
   @typedoc "What an authorization server says about itself."
@@ -23,7 +24,8 @@ defmodule WardrikOAuth.Metadata do
           authorization_endpoint: String.t() | nil,
           device_authorization_endpoint: String.t() | nil,
           registration_endpoint: String.t() | nil,
-          iss_supported?: boolean()
+          iss_supported?: boolean(),
+          documents_supported?: boolean()
         }
 
   @doc "Finds the metadata of `provider`'s authorization server."
@@ -81,7 +83,8 @@ defmodule WardrikOAuth.Metadata do
        authorization_endpoint: body["authorization_endpoint"],
        device_authorization_endpoint: body["device_authorization_endpoint"],
        registration_endpoint: body["registration_endpoint"],
-       iss_supported?: body["authorization_response_iss_parameter_supported"] == true
+       iss_supported?: body["authorization_response_iss_parameter_supported"] == true,
+       documents_supported?: body["client_id_metadata_document_supported"] == true
      }}
   end
 

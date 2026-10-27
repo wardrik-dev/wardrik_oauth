@@ -54,7 +54,9 @@ defmodule WardrikOAuth do
 
   @doc """
   Adds the provider `name` as the app runs, on every node, as `:providers` takes one. Without a
-  `client_id`, Wardrik registers itself with the service the first time someone signs in.
+  `client_id`, Wardrik becomes the service's client the first time someone signs in: by the URL of
+  the document `WardrikOAuth.Plug` serves, where the service reads Client ID Metadata Documents and
+  `page` is `https`, else by registering itself.
 
       :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
   """
@@ -71,6 +73,13 @@ defmodule WardrikOAuth do
   rescue
     error in ArgumentError -> {:error, Exception.message(error)}
   end
+
+  @doc """
+  Returns the Client ID Metadata Document `WardrikOAuth.Plug` serves at `{page}/client`, whose URL
+  is Wardrik's `client_id` with a service that reads them.
+  """
+  @spec client_document(atom()) :: map()
+  def client_document(oauth), do: oauth |> settings() |> Registration.document()
 
   @doc "Removes the provider `name` added as the app ran, and the client registered for it."
   @spec remove_provider(atom(), String.t()) :: :ok | {:error, term()}
