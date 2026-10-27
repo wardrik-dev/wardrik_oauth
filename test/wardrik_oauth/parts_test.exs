@@ -96,6 +96,13 @@ defmodule WardrikOAuth.PartsTest do
       insecure = Provider.new(:test, issuer: "http://auth.test", client_id: "client")
       assert {:error, {:insecure_url, _url}} = Metadata.discover(insecure, @req)
     end
+
+    test "won't ask a URL its check refuses" do
+      check = fn url -> {:error, "#{URI.parse(url).host} is private"} end
+
+      assert {:error, {:unreachable_url, _url, "auth.test is private"}} =
+               Metadata.discover(provider(), [check: check] ++ @req)
+    end
   end
 
   describe "a device flow" do

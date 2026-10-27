@@ -26,7 +26,12 @@ defmodule WardrikOAuth do
   @doc """
   Starts the sign-ins. Takes `:name`, `:vault`, `:store`, where providers added as it runs are
   kept, `:page`, `:providers`, `:on_granted`, `:client_name`, what a service shows of a client
-  Wardrik registers itself, `"Wardrik"` unless set, and `:req_options`.
+  Wardrik registers itself, `"Wardrik"` unless set, `:req_options`, and `:check`.
+
+  `:check` is a function each URL it sends a request to is held to first, answering `:ok` or
+  `{:error, why}`. Give one where others name the services, as the users of a hosted app add
+  providers by URL, and those services name the endpoints Wardrik reaches. Every `https` URL, and
+  `http` on the machine itself, is reached unless it's given.
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
@@ -39,7 +44,8 @@ defmodule WardrikOAuth do
         providers: [],
         on_granted: nil,
         client_name: "Wardrik",
-        req_options: []
+        req_options: [],
+        check: nil
       ])
 
     name = Keyword.fetch!(opts, :name)
@@ -190,7 +196,7 @@ defmodule WardrikOAuth do
           {to_string(name), Provider.new(name, provider)}
         end),
       on_granted: opts.on_granted,
-      req_options: opts.req_options,
+      req_options: checked(opts.check) ++ opts.req_options,
       registry: registry(opts.name),
       flows: Module.concat(opts.name, Flows)
     }
@@ -202,6 +208,9 @@ defmodule WardrikOAuth do
 
     Supervisor.init(children, strategy: :rest_for_one)
   end
+
+  defp checked(nil), do: []
+  defp checked(check), do: [check: check]
 
   defp settings(oauth) do
     {:ok, settings} = Registry.meta(registry(oauth), :settings)
