@@ -46,7 +46,7 @@ children = [
      github: [
        issuer: "https://github.com/login/oauth",
        client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
-       client_secret: System.fetch_env!("GITHUB_CLIENT_SECRET"),
+       client_secret: {:secret, "GITHUB_CLIENT_SECRET"},
        scopes: ~w(repo),
        flow: :device
      ]
@@ -85,6 +85,10 @@ notion: [
 | `scopes` | what to ask for | none |
 | `flow` | `:browser` or `:device` | `:browser` |
 | `authorization_params` | more to send with a browser sign-in | none |
+
+A `client_secret` written `{:secret, name}`, as GitHub's above, is the deployment's secret of that
+name in the vault, read each time a sign-in needs it, so changing it takes no restart:
+`WardrikVault.put(MyApp.Vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", secret)`.
 
 ## Give it to agents
 

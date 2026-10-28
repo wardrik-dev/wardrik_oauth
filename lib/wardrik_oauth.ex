@@ -11,6 +11,10 @@ defmodule WardrikOAuth do
          on_granted: {MyApp.Agents, :granted, []},
          providers: [github: [issuer: "https://github.com/login/oauth", client_id: id, client_secret: secret]]}
       ]
+
+  A provider's `client_secret` may be `{:secret, name}`, the deployment's secret of that name in the
+  vault, read each time a sign-in needs it, so a new one takes effect at once. See
+  `WardrikVault.value/2`.
   """
 
   @behaviour WardrikVault.Grants
@@ -241,8 +245,18 @@ defmodule WardrikOAuth do
 
   defp provider(settings, name) do
     case Map.fetch(settings.providers, name) do
-      {:ok, provider} -> {:ok, Registration.registered(settings, provider)}
+      {:ok, provider} -> configured(settings, provider)
       :error -> added(settings, name)
+    end
+  end
+
+  defp configured(settings, %Provider{client_secret: secret} = provider) do
+    case WardrikVault.value(settings.vault, secret) do
+      {:ok, secret} ->
+        {:ok, Registration.registered(settings, %{provider | client_secret: secret})}
+
+      {:error, _reason} ->
+        {:error, "#{provider.name}'s client_secret, #{inspect(secret)}, isn't sealed"}
     end
   end
 

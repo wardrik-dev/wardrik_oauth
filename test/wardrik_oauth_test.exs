@@ -57,6 +57,11 @@ defmodule WardrikOAuthTest do
          ],
          copilot: [resource: "https://api.github.test/mcp/", client_id: "client", flow: :device],
          github_web: [issuer: GitHub.issuer(), client_id: "client", client_secret: "secret"],
+         github_sealed: [
+           issuer: GitHub.issuer(),
+           client_id: "sealed-client",
+           client_secret: {:secret, "GITHUB_CLIENT_SECRET"}
+         ],
          google: [
            issuer: "https://accounts.test",
            client_id: "google-client",
@@ -105,6 +110,29 @@ defmodule WardrikOAuthTest do
     assert_raise ArgumentError, ~r/^MyApp.Missing isn't started/, fn ->
       WardrikOAuth.providers(MyApp.Missing)
     end
+  end
+
+  test "sends a provider's client secret sealed as the deployment's, read as it's used", %{
+    oauth: oauth,
+    vault: vault
+  } do
+    assert {:error, "github_sealed's client_secret" <> _} =
+             WardrikOAuth.authorize(oauth, "github_sealed", @jon)
+
+    {:ok, _vsn} =
+      WardrikVault.put(vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", "sealed-secret")
+
+    {:ok, url} = WardrikOAuth.authorize(oauth, "github_sealed", @jon)
+
+    {:ok, "github_sealed"} =
+      WardrikOAuth.finish(oauth, %{
+        "state" => state({:authorize, url}),
+        "code" => "c",
+        "iss" => GitHub.issuer()
+      })
+
+    assert_received {:exchanged,
+                     %{"client_id" => "sealed-client", "client_secret" => "sealed-secret"}}
   end
 
   describe "providers added as the app runs" do

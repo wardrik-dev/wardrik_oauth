@@ -26,7 +26,7 @@ defmodule WardrikOAuth.Provider do
           issuer: String.t() | nil,
           resource: String.t() | nil,
           client_id: String.t() | nil,
-          client_secret: String.t() | nil,
+          client_secret: WardrikVault.value(),
           authorization_endpoint: String.t() | nil,
           token_endpoint: String.t() | nil,
           scopes: [String.t()],
