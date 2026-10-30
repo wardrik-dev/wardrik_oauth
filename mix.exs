@@ -8,7 +8,7 @@ defmodule WardrikOAuth.MixProject do
       elixir: "~> 1.20",
       description: "OAuth sign-in for WardrikCore agents, with grants kept in WardrikVault.",
       package: package(),
-      docs: [main: "readme", extras: ["README.md"]],
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
@@ -47,7 +47,7 @@ defmodule WardrikOAuth.MixProject do
     [
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => "https://github.com/wardrik-dev/wardrik_oauth"},
-      files: ~w(lib mix.exs README.md LICENSE)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
