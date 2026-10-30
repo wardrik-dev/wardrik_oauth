@@ -1,15 +1,16 @@
 defmodule WardrikOAuth.ClientSecrets do
   @moduledoc """
-  Keeps the client secrets of the providers added as the app runs, and of the clients Wardrik
-  registers, sealed in the vault rather than the store, under a principal of their own that no
-  agent acts as.
+  Seals client secrets in the vault, not the store.
+
+  Covers providers added at runtime and clients Wardrik registers. Secrets are kept under a
+  principal of their own that no agent acts as.
   """
 
   alias WardrikCore.Principal
 
   @owner %Principal{id: "wardrik_oauth"}
 
-  @doc "Seals `secret` as `name`'s, or does nothing where there's none."
+  @doc "Seals `secret` under `name`. Does nothing if `secret` is `nil`."
   @spec seal(map(), String.t(), String.t() | nil) :: :ok | {:error, term()}
   def seal(_settings, _name, nil), do: :ok
 
@@ -20,7 +21,7 @@ defmodule WardrikOAuth.ClientSecrets do
     end
   end
 
-  @doc "Returns `name`'s secret, or `nil` where it has none."
+  @doc "Returns the secret under `name`, or `nil`."
   @spec unseal(map(), String.t()) :: String.t() | nil
   def unseal(settings, name) do
     case WardrikVault.fetch(settings.vault, @owner, name) do
@@ -29,7 +30,7 @@ defmodule WardrikOAuth.ClientSecrets do
     end
   end
 
-  @doc "Forgets `name`'s secret."
+  @doc "Deletes the secret under `name`."
   @spec forget(map(), String.t()) :: :ok
   def forget(settings, name) do
     WardrikVault.delete(settings.vault, @owner, name)

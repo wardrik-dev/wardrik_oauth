@@ -1,6 +1,8 @@
 defmodule WardrikOAuth.Renewal do
   @moduledoc """
-  Renewal keeps a principal's grant usable, refreshing it when it has run out.
+  Keeps a principal's grant usable by refreshing it when it expires.
+
+  Refreshes take a cluster-wide lock, so two nodes never spend the same refresh token.
   """
 
   alias WardrikCore.Principal
@@ -8,7 +10,11 @@ defmodule WardrikOAuth.Renewal do
   alias WardrikOAuth.Request
   alias WardrikOAuth.Token
 
-  @doc "Returns the grant's access token, refreshing it first when it has run out."
+  @doc """
+  Returns the grant's access token, refreshing it first if it has expired.
+
+  Returns `:ask` if the principal must sign in again.
+  """
   @spec renew(map(), Provider.t(), Principal.t(), binary()) ::
           {:ok, String.t()} | :ask | {:error, term()}
   def renew(settings, provider, principal, value) do

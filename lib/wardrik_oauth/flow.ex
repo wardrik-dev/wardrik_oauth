@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Flow do
   @moduledoc """
-  A flow is one sign-in under way, a process holding what it needs until the principal finishes.
+  A process for one sign-in under way. It ends when the principal finishes, or after 15 minutes.
   """
 
   use GenServer, restart: :temporary
@@ -17,7 +17,7 @@ defmodule WardrikOAuth.Flow do
 
   @lifetime :timer.minutes(15)
 
-  @doc "Returns the URL of the flow under way for `provider` and `principal`, starting one if none is."
+  @doc "Returns the sign-in URL for `provider` and `principal`, starting a flow if none is running."
   @spec begin(map(), Provider.t(), Principal.t()) :: {:authorize, String.t()} | {:error, term()}
   def begin(settings, %Provider{} = provider, %Principal{} = principal) do
     child = {__MODULE__, {settings, provider, principal}}
@@ -29,11 +29,11 @@ defmodule WardrikOAuth.Flow do
     end
   end
 
-  @doc "Describes the flow, for a page or a CLI to show."
+  @doc "Describes the flow, for a page or CLI to show."
   @spec describe(pid()) :: map()
   def describe(pid), do: GenServer.call(pid, :describe)
 
-  @doc "Finishes a browser flow with the parameters its callback carried."
+  @doc "Finishes a browser flow with its callback's params."
   @spec finish(pid(), map()) :: {:ok, String.t()} | {:error, term()}
   def finish(pid, params), do: GenServer.call(pid, {:finish, params}, :timer.seconds(30))
 

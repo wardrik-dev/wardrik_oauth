@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Metadata do
   @moduledoc """
-  Metadata is what an authorization server says about itself, found from its issuer or resource.
+  An authorization server's metadata, discovered from its issuer or resource.
   """
 
   alias WardrikOAuth.Provider
@@ -17,7 +17,7 @@ defmodule WardrikOAuth.Metadata do
     documents_supported?: false
   ]
 
-  @typedoc "What an authorization server says about itself."
+  @typedoc "An authorization server's metadata."
   @type t() :: %__MODULE__{
           issuer: String.t() | nil,
           token_endpoint: String.t(),
@@ -28,7 +28,12 @@ defmodule WardrikOAuth.Metadata do
           documents_supported?: boolean()
         }
 
-  @doc "Finds the metadata of `provider`'s authorization server."
+  @doc """
+  Returns the metadata of `provider`'s authorization server.
+
+  Uses the provider's own endpoints if it names both. Otherwise discovers them from `issuer`, or
+  from `resource`'s protected resource metadata.
+  """
   @spec discover(Provider.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def discover(%Provider{} = provider, req_options) do
     if Provider.endpoints?(provider),

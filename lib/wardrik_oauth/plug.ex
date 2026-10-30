@@ -1,9 +1,18 @@
 defmodule WardrikOAuth.Plug do
   @moduledoc """
-  The pages a sign-in comes back to, for your app's router to mount at `WardrikOAuth`'s `page`,
-  and the Client ID Metadata Document a service reads Wardrik's `client_id` from, at `client`.
+  Serves the sign-in pages. Mount it at `WardrikOAuth`'s `page`.
 
       forward "/oauth", WardrikOAuth.Plug, oauth: MyApp.OAuth
+
+  ## Paths
+
+    * `GET /callback` - finishes a browser sign-in.
+    * `GET /device/:id` - shows a device sign-in's code and where to enter it.
+    * `GET /client` - the Client ID Metadata Document for Wardrik's `client_id`.
+
+  ## Options
+
+    * `:oauth` - required. The `WardrikOAuth` name.
   """
 
   @behaviour Plug

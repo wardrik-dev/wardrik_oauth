@@ -1,22 +1,22 @@
 # WardrikOAuth
 
-OAuth sign-in for [WardrikCore](https://hexdocs.pm/wardrik_core) agents, with each grant kept sealed
-in a [WardrikVault](https://hexdocs.pm/wardrik_vault).
+OAuth sign-in for [WardrikCore](https://hexdocs.pm/wardrik_core) agents. Each grant is sealed in a
+[WardrikVault](https://hexdocs.pm/wardrik_vault).
 
 ## Install
 
 ```elixir
 def deps do
   [
-    {:wardrik_oauth, "~> 0.1"}
+    {:wardrik_oauth, "~> 0.1.0-rc.1"}
   ]
 end
 ```
 
 ## Start it
 
-Register an OAuth app with each service, and give its client ID and secret as a provider. Give the
-vault `WardrikOAuth` as its grants:
+Register an OAuth app with each service and add it as a provider. Pass `WardrikOAuth` to the vault
+as its `grants`:
 
 ```elixir
 children = [
@@ -54,15 +54,17 @@ children = [
 ]
 ```
 
-A provider is named like the credential it grants, so a tool that needs `google` signs in through
-the `google` provider. Its endpoints are found from the `issuer`'s metadata. For a service that
-publishes none, like Linear, give `authorization_endpoint` and `token_endpoint` instead.
+A provider has the same name as the credential it grants. A tool that needs `google` signs in
+through the `google` provider.
 
-`authorization_params` are sent with a browser sign-in. Google hands back a refresh token only
-when asked for `access_type: "offline"`.
+Endpoints are discovered from the `issuer`'s metadata. For a service without metadata, like
+Linear, give `authorization_endpoint` and `token_endpoint`.
 
-The client's secret is sent in the form by default. Some services, like Notion, want it in an HTTP
-Basic header instead, so set `client_auth: :basic`:
+`authorization_params` are sent with a browser sign-in. Google only returns a refresh token when
+asked for `access_type: "offline"`.
+
+The client secret is sent in the form by default. Some services, like Notion, want HTTP Basic
+instead. Set `client_auth: :basic`:
 
 ```elixir
 notion: [
@@ -75,29 +77,38 @@ notion: [
 ]
 ```
 
-| Option | Takes | Unless set |
-| --- | --- | --- |
-| `issuer` | the authorization server, whose metadata names its endpoints | found from `resource` |
-| `resource` | the API or MCP server the token is for | not sent |
-| `authorization_endpoint`, `token_endpoint` | the endpoints, for a service that publishes no metadata | discovered |
-| `client_id`, `client_secret` | your OAuth app's | Wardrik's own, where the service allows; see [Without a client ID](#without-a-client-id) |
-| `client_auth` | `:post` or `:basic`, how the secret is sent | `:post` |
-| `scopes` | what to ask for | none |
-| `flow` | `:browser` or `:device` | `:browser` |
-| `authorization_params` | more to send with a browser sign-in | none |
+### Provider options
 
-A `client_secret` written `{:secret, name}`, as GitHub's above, is the deployment's secret of that
-name in the vault, read each time a sign-in needs it, so changing it takes no restart:
-`WardrikVault.put(MyApp.Vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", secret)`.
+| Option | Value | Default |
+| --- | --- | --- |
+| `issuer` | the authorization server, whose metadata names its endpoints | discovered from `resource` |
+| `resource` | the API or MCP server the token is for | not sent |
+| `authorization_endpoint`, `token_endpoint` | the endpoints, for a service without metadata | discovered |
+| `client_id`, `client_secret` | your OAuth app's credentials | Wardrik's own, if the service allows; see [Without a client ID](#without-a-client-id) |
+| `client_auth` | `:post` or `:basic`, how the secret is sent | `:post` |
+| `scopes` | scopes to ask for | none |
+| `flow` | `:browser` or `:device` | `:browser` |
+| `authorization_params` | extra parameters for a browser sign-in | none |
+
+A provider needs an `issuer`, a `resource`, or both endpoints.
+
+### Secrets in the vault
+
+A `client_secret` of `{:secret, name}` is read from the vault's deployment secrets each time a
+sign-in needs it. Changing it takes no restart:
+
+```elixir
+WardrikVault.put(MyApp.Vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", secret)
+```
 
 ## Give it to agents
 
-An agent reads its principal's grants through the vault, as its `credentials`. A tool asks for the
-credential by the provider's name, like an MCP server's `credential_name`:
+Pass the vault as the agent's `credentials`. A tool asks for a credential by the provider's name,
+as an MCP server's `credential_name` does:
 
 ```elixir
 children = [
-  # ...the store, vault and WardrikOAuth above, then:
+  # The store, vault and WardrikOAuth above, then:
   {WardrikMCP,
    name: MyApp.MCP,
    servers: [
@@ -118,8 +129,9 @@ WardrikCore.start_agent(
 )
 ```
 
-The first call that needs `github` before Jon has signed in waits on a sign-in. Once Jon has,
-`on_granted` gets the provider's name and Jon's principal. Resume the agents waiting on it there:
+If Jon hasn't signed in, the first call that needs `github` parks on a sign-in. Once Jon signs in,
+`on_granted` is called with the provider's name and Jon's principal. Resume the waiting agents
+there:
 
 ```elixir
 defmodule MyApp.SignIns do
@@ -148,33 +160,32 @@ defmodule MyApp.SignIns do
 end
 ```
 
-With [Wardrik](https://hexdocs.pm/wardrik), all of this is done for you. See
+[Wardrik](https://hexdocs.pm/wardrik) does all of this for you. See
 [Credentials and sign-ins](https://hexdocs.pm/wardrik/credentials.html).
 
-## Add providers as the app runs
+## Add providers at runtime
 
-A provider can be added while the app runs, and every node sees it. One without a `client_id`
-registers Wardrik with the service the first time someone signs in, as RFC 7591 says, the way an
-MCP server's own authorization server expects:
+Providers added at runtime are kept in the store, so every node sees them:
 
 ```elixir
 :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
+
 WardrikOAuth.authorize(MyApp.OAuth, "linear", maria)
 #=> {:ok, "https://mcp.linear.app/authorize?client_id=...&state=..."}
 
 WardrikOAuth.providers(MyApp.OAuth)
 #=> ["github", "google", "linear"]
 
-
 :ok = WardrikOAuth.remove_provider(MyApp.OAuth, "linear")
 ```
 
-The registration is kept in the store, so it happens once. `client_name` names Wardrik on the
-service's page, `"Wardrik"` unless set. `providers/1` lists the providers someone can sign in with.
+A provider without a `client_id` gets one the first time someone signs in. See
+[Without a client ID](#without-a-client-id). The client is kept in the store, so this happens
+once. `client_name` is the name the service shows. `"Wardrik"` unless set.
 
 ## Mount the pages
 
-A sign-in comes back to your app, so mount `WardrikOAuth.Plug` at `page`. In a Phoenix router:
+Sign-ins come back to your app. Mount `WardrikOAuth.Plug` at `page`. In a Phoenix router:
 
 ```elixir
 scope "/" do
@@ -182,56 +193,59 @@ scope "/" do
 end
 ```
 
-In a `Plug.Router`, served by Bandit or Cowboy:
+In a `Plug.Router`:
 
 ```elixir
 forward "/oauth", to: WardrikOAuth.Plug, init_opts: [oauth: MyApp.OAuth]
 ```
 
-It serves three pages under `page`:
+It serves three paths under `page`:
 
 | Path | What it does |
 | --- | --- |
-| `/callback` | Finishes a browser sign-in. Register `page` followed by `/callback` as each OAuth app's redirect URI, like `https://agents.example.com/oauth/callback`. |
-| `/device/:id` | Shows a device sign-in's code, and where to enter it. |
-| `/client` | The Client ID Metadata Document a service reads Wardrik's `client_id` from. |
+| `/callback` | Finishes a browser sign-in. Register it as each OAuth app's redirect URI, as `https://agents.example.com/oauth/callback`. |
+| `/device/:id` | Shows a device sign-in's code and where to enter it. |
+| `/client` | Serves the Client ID Metadata Document for Wardrik's own `client_id`. |
+
+To handle the callback in your own route, call `WardrikOAuth.finish/2` with its query params. It
+returns `{:ok, provider}` or `{:error, reason}`.
 
 ### Without a client ID
 
-A provider given no `client_id`, as one an MCP server's owner adds by its URL, gets Wardrik's own
-the first time someone signs in, and every node keeps it:
+A provider with no `client_id` gets Wardrik's own the first time someone signs in. It's kept in the
+store for every node.
 
-- Where the service reads Client ID Metadata Documents, as its metadata's
-  `client_id_metadata_document_supported` says, and `page` is `https` on a host the service can
-  reach, the `client_id` is the URL of the document at `/client`, as
-  `https://agents.example.com/oauth/client`. Nothing is registered, and the consent screen shows
-  `client_name`.
-- Otherwise Wardrik registers itself with the service's `registration_endpoint`, as RFC 7591 says.
-- With neither, signing in fails with `{:no_client, name}`, and the provider needs a `client_id` of
-  your own.
-
-To handle the callback in a route of your own, call `WardrikOAuth.finish/2` with its query
-parameters. It returns `{:ok, provider}` or `{:error, reason}`.
+1. If the service supports Client ID Metadata Documents (`client_id_metadata_document_supported`
+   in its metadata) and `page` is `https` and not localhost, the `client_id` is the `/client`
+   URL, as `https://agents.example.com/oauth/client`. Nothing is registered. The consent screen shows
+   `client_name`.
+2. Otherwise, Wardrik registers itself at the service's `registration_endpoint` (RFC 7591).
+3. If neither is possible, sign-in fails with `{:no_client, name}`. Give the provider your own
+   `client_id`.
 
 ## Sign in
 
-When a tool needs a credential its principal hasn't authorized, its call parks on a sign-in URL.
+When a tool needs a credential its principal hasn't granted, the call parks on a sign-in URL.
 
-- In a browser sign-in, the default, it's the service's own page. The principal signs in there, and
-  comes back to `/callback`.
-- In a device sign-in, `flow: :device`, it's `/device/:id`, which shows a code to enter on any
+* Browser sign-in (the default): the URL is the service's own page. The principal signs in there
+  and returns to `/callback`.
+* Device sign-in (`flow: :device`): the URL is `/device/:id`, which shows a code to enter on any
   device. `WardrikOAuth.flow/2` returns the same code, for a CLI to show.
 
-Once they've authorized, the token is sealed in the vault, and `on_granted` is called with the
-provider's name and the principal. Resume the turns parked on it from there.
-`[:wardrik_oauth, :flow, :done]` is emitted as every sign-in ends, for watching.
+Once the principal grants access:
 
-A sign-in ends after 15 minutes. Only one runs for a provider and principal at a time, and asking
+1. The token is sealed in the vault.
+2. `on_granted` is called with the provider's name and the principal. Resume parked turns there.
+
+A sign-in expires after 15 minutes. Only one runs per provider and principal at a time. Asking
 again returns the same URL.
+
+`[:wardrik_oauth, :flow, :done]` is emitted when each sign-in ends, with `:provider`, `:principal`
+and `:outcome` in its metadata.
 
 ## Renewing
 
-An expired token is refreshed before anyone is asked again, and a token a service refused is
-refreshed on its next use. When it can't be refreshed, the principal is asked to sign in again.
+An expired token is refreshed before the principal is asked again. A token the service refused is
+refreshed on its next use. If it can't be refreshed, the principal is asked to sign in again.
 
 Refreshes take a cluster-wide lock, so two nodes never spend the same refresh token.

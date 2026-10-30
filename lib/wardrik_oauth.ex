@@ -1,19 +1,23 @@
 defmodule WardrikOAuth do
   @moduledoc """
-  OAuth sign-in for WardrikCore agents, with the grants kept sealed in a `WardrikVault`.
+  OAuth sign-in for WardrikCore agents. Grants are sealed in a `WardrikVault`.
 
       children = [
         {WardrikVault, name: MyApp.Vault, store: store, keys: keys, grants: {WardrikOAuth, MyApp.OAuth}},
         {WardrikOAuth,
          name: MyApp.OAuth,
          vault: MyApp.Vault,
+         store: store,
          page: "https://agents.example.com/oauth",
          on_granted: {MyApp.Agents, :granted, []},
          providers: [github: [issuer: "https://github.com/login/oauth", client_id: id, client_secret: secret]]}
       ]
 
-  A provider's `client_secret` may be `{:secret, name}`, the deployment's secret of that name in the
-  vault, read each time a sign-in needs it, so a new one takes effect at once. See
+  Mount `WardrikOAuth.Plug` at `page` to finish sign-ins. See `WardrikOAuth.Provider` for provider
+  options.
+
+  A provider's `client_secret` may be `{:secret, name}`. It's read from the vault's deployment
+  secrets each time a sign-in needs it, so a new one takes effect at once. See
   `WardrikVault.value/2`.
   """
 
@@ -29,14 +33,26 @@ defmodule WardrikOAuth do
   alias WardrikOAuth.Token
 
   @doc """
-  Starts the sign-ins. Takes `:name`, `:vault`, `:store`, where providers added as it runs are
-  kept, `:page`, `:providers`, `:on_granted`, `:client_name`, what a service shows of a client
-  Wardrik registers itself, `"Wardrik"` unless set, `:req_options`, and `:check`.
+  Starts `WardrikOAuth`.
 
-  `:check` is a function each URL it sends a request to is held to first, answering `:ok` or
-  `{:error, why}`. Give one where others name the services, as the users of a hosted app add
-  providers by URL, and those services name the endpoints Wardrik reaches. Every `https` URL, and
-  `http` on the machine itself, is reached unless it's given.
+  ## Options
+
+    * `:name` - required. The name functions reach it by.
+    * `:vault` - required. The `WardrikVault` grants are sealed in.
+    * `:store` - required. The `WardrikStore` for providers added at runtime and registered
+      clients.
+    * `:page` - required. The URL `WardrikOAuth.Plug` is mounted at, as
+      `"https://agents.example.com/oauth"`.
+    * `:providers` - providers to start with, as a keyword list of name and options. See
+      `WardrikOAuth.Provider`. `[]` unless set.
+    * `:on_granted` - `{module, function, args}` called with the provider's name and the principal,
+      then `args`, after each grant.
+    * `:client_name` - the name a service shows for a client Wardrik registers. `"Wardrik"`
+      unless set.
+    * `:req_options` - extra options for every `Req` request.
+    * `:check` - a function called on each URL before a request is sent. It returns `:ok` or
+      `{:error, reason}`. Use one when users add providers by URL. Without it, any `https` URL,
+      and `http` on localhost, is reached.
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
@@ -58,13 +74,20 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Adds the provider `name` as the app runs, on every node, as `:providers` takes one. Its
-  `client_secret`, and that of a client Wardrik registers, is sealed in the vault, never kept in the
-  store. Without a `client_id`, Wardrik becomes the service's client the first time someone signs
-  in: by the URL of the document `WardrikOAuth.Plug` serves, where the service reads Client ID
-  Metadata Documents and `page` is `https`, else by registering itself.
+  Adds the provider `name` at runtime, on every node.
 
       :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
+
+  Takes the same options as a provider in `:providers`. The `client_secret` is sealed in the vault,
+  not kept in the store.
+
+  Without a `client_id`, Wardrik gets one the first time someone signs in:
+
+    1. If the service reads Client ID Metadata Documents and `page` is `https`, the `client_id` is
+       the URL of the document `WardrikOAuth.Plug` serves.
+    2. Otherwise, Wardrik registers itself with the service.
+
+  Returns `{:error, reason}` for invalid options, or a name given in `:providers`.
   """
   @spec add_provider(atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
   def add_provider(oauth, name, opts) when is_binary(name) do
@@ -84,13 +107,14 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Returns the Client ID Metadata Document `WardrikOAuth.Plug` serves at `{page}/client`, whose URL
-  is Wardrik's `client_id` with a service that reads them.
+  Returns the Client ID Metadata Document served at `{page}/client`.
+
+  Its URL is Wardrik's `client_id` with services that read these documents.
   """
   @spec client_document(atom()) :: map()
   def client_document(oauth), do: oauth |> settings() |> Registration.document()
 
-  @doc "Removes the provider `name` added as the app ran, and the client registered for it."
+  @doc "Removes the provider `name`, added at runtime, and the client registered for it."
   @spec remove_provider(atom(), String.t()) :: :ok | {:error, term()}
   def remove_provider(oauth, name) do
     settings = settings(oauth)
@@ -113,7 +137,11 @@ defmodule WardrikOAuth do
     Enum.sort(Map.keys(settings.providers) ++ added)
   end
 
-  @doc "Returns where `principal` signs in with the provider `name`, starting a sign-in unless one is under way."
+  @doc """
+  Returns the URL where `principal` signs in with the provider `name`.
+
+  Starts a sign-in, or returns the URL of the one already under way.
+  """
   @spec authorize(atom(), String.t(), WardrikCore.Principal.t()) ::
           {:ok, String.t()} | {:error, term()}
   def authorize(oauth, name, principal) do
@@ -124,7 +152,12 @@ defmodule WardrikOAuth do
          do: {:ok, url}
   end
 
-  @doc "Describes the device sign-in `id` names, with the code to enter and where, or returns `:error`."
+  @doc """
+  Describes the device sign-in `id`.
+
+  Returns `{:ok, map}` with `:provider`, `:principal`, `:user_code` and `:verification_uri`, or
+  `:error` if the sign-in has ended.
+  """
   @spec flow(atom(), String.t()) :: {:ok, map()} | :error
   def flow(oauth, id) do
     case Registry.lookup(registry(oauth), {:id, id}) do
@@ -140,9 +173,12 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Finishes the browser sign-in a callback's `state` names, with the `code` or `error` it carried.
+  Finishes a browser sign-in from its callback's query params.
 
-  `WardrikOAuth.Plug` calls this. Call it yourself from a route of your own.
+  The params carry `"state"`, and `"code"` or `"error"`. Returns `{:ok, provider}` or
+  `{:error, reason}`, and `{:error, :no_such_flow}` if the sign-in has ended.
+
+  `WardrikOAuth.Plug` calls this. Call it yourself to handle the callback in your own route.
   """
   @spec finish(atom(), map()) :: {:ok, String.t()} | {:error, term()}
   def finish(oauth, %{"state" => state} = params) when is_binary(state) do

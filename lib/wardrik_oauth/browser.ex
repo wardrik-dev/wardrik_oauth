@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Browser do
   @moduledoc """
-  A browser flow signs a principal in on the service's page, with the authorization code flow and PKCE.
+  Browser sign-in: the authorization code flow with PKCE, on the service's own page.
   """
 
   alias WardrikOAuth.Metadata
@@ -40,7 +40,7 @@ defmodule WardrikOAuth.Browser do
     {:ok, %{url: url, state: state, verifier: verifier}}
   end
 
-  @doc "Returns whether a callback's `iss` names the issuer, or needn't."
+  @doc "Returns whether a callback's `iss` matches the issuer, or may be absent."
   @spec issued_by?(Metadata.t(), String.t() | nil) :: boolean()
   def issued_by?(%Metadata{issuer: nil, iss_supported?: false}, _iss), do: true
   def issued_by?(%Metadata{issuer: issuer}, issuer) when is_binary(issuer), do: true

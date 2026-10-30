@@ -1,10 +1,13 @@
 defmodule WardrikOAuth.Registration do
   @moduledoc """
-  Makes Wardrik a client of an authorization server it has no `client_id` for, once, and keeps the
-  client in the store for every node. Where the server reads Client ID Metadata Documents and the
-  sign-in pages are served over `https`, the `client_id` is the URL of the document the pages
-  serve, at `{page}/client`, and nothing is registered. Otherwise Wardrik registers itself, as RFC
-  7591 says.
+  Makes Wardrik a client of an authorization server it has no `client_id` for.
+
+  This happens once. The client is kept in the store for every node.
+
+    1. If the server reads Client ID Metadata Documents and `page` is `https`, the `client_id` is
+       `{page}/client`. Nothing is registered.
+    2. Otherwise, Wardrik registers itself at the server's `registration_endpoint` (RFC 7591).
+    3. If neither is possible, it returns `{:error, {:no_client, name}}`.
   """
 
   alias WardrikOAuth.ClientSecrets
@@ -14,7 +17,7 @@ defmodule WardrikOAuth.Registration do
 
   @device "urn:ietf:params:oauth:grant-type:device_code"
 
-  @doc "Returns `provider` with its client: its own, the one kept, or one registered now."
+  @doc "Returns `provider` with a client: its own, the one kept, or one registered now."
   @spec client(map(), Provider.t(), Metadata.t()) :: {:ok, Provider.t()} | {:error, term()}
   def client(_settings, %Provider{client_id: id} = provider, _metadata) when is_binary(id),
     do: {:ok, provider}
@@ -26,7 +29,7 @@ defmodule WardrikOAuth.Registration do
     end
   end
 
-  @doc "Returns `provider` with the client registered for it, where one was."
+  @doc "Returns `provider` with the client kept for it, if there is one."
   @spec registered(map(), Provider.t()) :: Provider.t()
   def registered(_settings, %Provider{client_id: id} = provider) when is_binary(id), do: provider
 
@@ -37,14 +40,14 @@ defmodule WardrikOAuth.Registration do
     end
   end
 
-  @doc "Forgets the client registered for the provider `name`."
+  @doc "Deletes the client registered for the provider `name`."
   @spec forget(map(), String.t()) :: :ok | {:error, term()}
   def forget(settings, name) do
     with :ok <- WardrikStore.delete(settings.store, key(name)),
          do: ClientSecrets.forget(settings, key(name))
   end
 
-  @doc "Returns the Client ID Metadata Document the sign-in pages serve, at `{page}/client`."
+  @doc "Returns the Client ID Metadata Document served at `{page}/client`."
   @spec document(map()) :: map()
   def document(settings) do
     settings

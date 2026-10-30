@@ -1,7 +1,33 @@
 defmodule WardrikOAuth.Provider do
   @moduledoc """
-  A provider is an OAuth app with a service, named like the credential it grants: one you
-  registered, with its `client_id`, or one Wardrik registers itself, where the service lets it.
+  An OAuth app with a service. It has the same name as the credential it grants.
+
+      github: [
+        issuer: "https://github.com/login/oauth",
+        client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
+        client_secret: {:secret, "GITHUB_CLIENT_SECRET"},
+        scopes: ~w(repo),
+        flow: :device
+      ]
+
+  ## Options
+
+    * `:issuer` - the authorization server, whose metadata names its endpoints.
+    * `:resource` - the API or MCP server the token is for. Used to discover the issuer if none is
+      given.
+    * `:authorization_endpoint`, `:token_endpoint` - the endpoints, for a service without
+      metadata.
+    * `:client_id` - your OAuth app's client ID. Without it, Wardrik becomes the client where the
+      service allows. See `WardrikOAuth.add_provider/3`.
+    * `:client_secret` - the client secret, or `{:secret, name}` to read it from the vault.
+    * `:client_auth` - `:post` to send the secret in the form, or `:basic` for HTTP Basic.
+      `:post` unless set.
+    * `:scopes` - scopes to ask for. `[]` unless set.
+    * `:flow` - `:browser` or `:device`. `:browser` unless set.
+    * `:authorization_params` - extra parameters for a browser sign-in, as
+      `%{access_type: "offline"}`. Can't set the parameters Wardrik sends itself.
+
+  A provider needs an `:issuer`, a `:resource`, or both endpoints.
   """
 
   @derive {Inspect, except: [:client_secret]}
@@ -20,7 +46,7 @@ defmodule WardrikOAuth.Provider do
     authorization_params: %{}
   ]
 
-  @typedoc "An OAuth app a principal can authorize."
+  @typedoc "An OAuth app a principal can grant access to."
   @type t() :: %__MODULE__{
           name: String.t(),
           issuer: String.t() | nil,
@@ -50,7 +76,7 @@ defmodule WardrikOAuth.Provider do
 
   @own_params ~w(response_type client_id redirect_uri scope state code_challenge code_challenge_method resource)
 
-  @doc "Builds a provider from its name and options."
+  @doc "Builds a provider from its name and options. Raises `ArgumentError` on invalid options."
   @spec new(atom() | String.t(), keyword()) :: t()
   def new(name, opts) do
     opts =
@@ -70,7 +96,7 @@ defmodule WardrikOAuth.Provider do
         )
   end
 
-  @doc "Returns whether the provider names its own endpoints, so nothing needs discovering."
+  @doc "Returns whether the provider names both endpoints, so none need discovering."
   @spec endpoints?(t()) :: boolean()
   def endpoints?(%__MODULE__{authorization_endpoint: authorize, token_endpoint: token}),
     do: is_binary(authorize) and is_binary(token)

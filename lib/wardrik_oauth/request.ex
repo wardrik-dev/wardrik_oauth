@@ -1,7 +1,9 @@
 defmodule WardrikOAuth.Request do
   @moduledoc """
-  Sends the requests a flow makes to an authorization server. Each takes Req's options, and
-  `:check`, a function each URL is held to first.
+  Sends a flow's requests to an authorization server.
+
+  Each function takes `Req` options, plus `:check`, a function called on each URL first. URLs
+  must be `https`, or `http` on localhost.
   """
 
   alias WardrikOAuth.Provider
@@ -23,10 +25,9 @@ defmodule WardrikOAuth.Request do
   end
 
   @doc """
-  Posts `form` to `url` as `provider`'s client, and returns the status with the JSON it answered.
+  Posts `form` to `url` as `provider`'s client. Returns the status and the JSON body.
 
-  The client's secret goes in the form, or in an HTTP Basic header when the provider's
-  `client_auth` is `:basic`.
+  The client secret goes in the form, or in an HTTP Basic header if `client_auth` is `:basic`.
   """
   @spec post_as(String.t(), Provider.t(), map(), keyword()) ::
           {:ok, pos_integer(), map()} | {:error, term()}
@@ -43,7 +44,7 @@ defmodule WardrikOAuth.Request do
     end
   end
 
-  @doc "Posts `body` to `url` as JSON, and returns the status with the JSON it answered."
+  @doc "Posts `body` to `url` as JSON. Returns the status and the JSON body."
   @spec post_json(String.t(), map(), keyword()) :: {:ok, pos_integer(), map()} | {:error, term()}
   def post_json(url, body, req_options) do
     {check, req_options} = Keyword.pop(req_options, :check)
@@ -57,7 +58,7 @@ defmodule WardrikOAuth.Request do
     end
   end
 
-  @doc "Reads an OAuth error answer as `{:token_refused, error, description}`."
+  @doc "Returns an OAuth error response as `{:token_refused, error, description}`."
   @spec refusal(pos_integer(), map()) :: {:token_refused, String.t(), String.t() | nil}
   def refusal(status, body) do
     description = body["error_description"]
@@ -66,7 +67,7 @@ defmodule WardrikOAuth.Request do
      description && String.slice(description, 0, 200)}
   end
 
-  @doc "Puts `value` in `form` under `key`, unless it's empty."
+  @doc "Puts `value` in `form` under `key`, unless it's `nil` or `\"\"`."
   @spec present(map(), String.t(), term()) :: map()
   def present(form, _key, nil), do: form
   def present(form, _key, ""), do: form

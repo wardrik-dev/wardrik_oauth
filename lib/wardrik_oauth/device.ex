@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Device do
   @moduledoc """
-  A device flow lets a principal authorize on any device, by entering a code, as in RFC 8628.
+  Device sign-in (RFC 8628): the principal enters a code on any device.
   """
 
   alias WardrikOAuth.Metadata
@@ -14,7 +14,7 @@ defmodule WardrikOAuth.Device do
   @enforce_keys [:device_code, :user_code, :verification_uri, :expires_in, :interval]
   defstruct [:device_code, :user_code, :verification_uri, :expires_in, :interval]
 
-  @typedoc "The code a server gave, and where to enter it."
+  @typedoc "The code the server gave and where to enter it."
   @type t() :: %__MODULE__{
           device_code: String.t(),
           user_code: String.t(),
@@ -23,10 +23,10 @@ defmodule WardrikOAuth.Device do
           interval: non_neg_integer()
         }
 
-  @typedoc "What one poll found."
+  @typedoc "The result of one poll."
   @type poll() :: {:ok, Token.t()} | :pending | :slow_down | {:retry, term()} | {:error, term()}
 
-  @doc "Asks the server for a code the principal can enter."
+  @doc "Requests a code for the principal to enter."
   @spec request(Metadata.t(), Provider.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def request(%Metadata{device_authorization_endpoint: nil, issuer: issuer}, _provider, _req),
     do: {:error, {:no_device_flow, issuer}}
@@ -44,7 +44,7 @@ defmodule WardrikOAuth.Device do
     end
   end
 
-  @doc "Asks the token endpoint once whether the principal has entered the code."
+  @doc "Polls the token endpoint once to see if the principal has entered the code."
   @spec poll(Metadata.t(), Provider.t(), t(), keyword()) :: poll()
   def poll(%Metadata{} = metadata, %Provider{} = provider, %__MODULE__{} = device, req_options) do
     form =
@@ -57,7 +57,7 @@ defmodule WardrikOAuth.Device do
     |> polled(metadata.token_endpoint)
   end
 
-  @doc "Returns how long to wait before the next poll, in milliseconds."
+  @doc "Returns milliseconds to wait before the next poll. Adds 5 seconds after `:slow_down`."
   @spec next_interval(poll(), non_neg_integer()) :: non_neg_integer()
   def next_interval(:slow_down, interval_ms), do: interval_ms + :timer.seconds(5)
   def next_interval(_poll, interval_ms), do: interval_ms
