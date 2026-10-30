@@ -4,7 +4,7 @@ defmodule WardrikOAuth.MixProject do
   def project do
     [
       app: :wardrik_oauth,
-      version: "0.1.0",
+      version: "0.1.0-rc.1",
       elixir: "~> 1.20",
       description: "OAuth sign-in for WardrikCore agents, with grants kept in WardrikVault.",
       package: package(),
