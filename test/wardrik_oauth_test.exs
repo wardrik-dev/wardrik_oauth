@@ -3,9 +3,12 @@ defmodule WardrikOAuthTest do
 
   alias WardrikCore.Principal
   alias WardrikOAuth.GitHub
+  alias WardrikOAuth.Provider
   alias WardrikOAuth.Token
 
   @jon %Principal{id: "user:jon"}
+  @acme_jon %Principal{id: "acme/@jon"}
+  @deployment Wardrik.Resource.deployment()
   @granted %{"access_token" => "gho_granted", "refresh_token" => "rt_1", "expires_in" => 3600}
 
   setup {Req.Test, :set_req_test_to_shared}
@@ -103,12 +106,27 @@ defmodule WardrikOAuthTest do
   defp keep(vault, token),
     do: WardrikVault.put(vault, @jon, "github", Token.encode(token), kind: :grant)
 
+  defp names(providers), do: Enum.map(providers, & &1.name)
+
+  defp client_id({:ok, url}), do: client_id({:authorize, url})
+  defp client_id({:authorize, url}), do: URI.decode_query(URI.parse(url).query)["client_id"]
+
+  defp sign_in(oauth, name, principal) do
+    {:ok, url} = WardrikOAuth.authorize(oauth, name, principal)
+
+    WardrikOAuth.finish(oauth, %{
+      "state" => state({:authorize, url}),
+      "code" => "c",
+      "iss" => GitHub.issuer()
+    })
+  end
+
   defp token(fields),
     do: struct!(Token, [token_endpoint: "https://github.test/login/oauth/access_token"] ++ fields)
 
   test "says which sign-ins aren't started" do
     assert_raise ArgumentError, ~r/^MyApp.Missing isn't started/, fn ->
-      WardrikOAuth.providers(MyApp.Missing)
+      WardrikOAuth.providers(MyApp.Missing, "acme")
     end
   end
 
@@ -116,7 +134,8 @@ defmodule WardrikOAuthTest do
     oauth: oauth,
     vault: vault
   } do
-    assert {:error, "github_sealed's client_secret" <> _} =
+    assert {:error,
+            "github_sealed's client_secret, {:secret, \"GITHUB_CLIENT_SECRET\"}, isn't sealed for deployment"} =
              WardrikOAuth.authorize(oauth, "github_sealed", @jon)
 
     {:ok, _vsn} =
@@ -136,45 +155,46 @@ defmodule WardrikOAuthTest do
   end
 
   describe "providers added as the app runs" do
-    test "keep an app's client secret sealed in the vault, and send it on exchange", %{
-      oauth: oauth,
-      vault: vault,
-      store: store
-    } do
+    test "read their owner's client secret each time it's used", %{oauth: oauth, vault: vault} do
       assert :ok =
-               WardrikOAuth.add_provider(oauth, "acme/crm",
+               WardrikOAuth.add_provider(oauth, "acme", "crm",
+                 issuer: GitHub.issuer(),
+                 client_id: "acme-app",
+                 client_secret: {:secret, "CRM_SECRET"}
+               )
+
+      assert {:error, "crm's client_secret, {:secret, \"CRM_SECRET\"}, isn't sealed for acme"} =
+               WardrikOAuth.authorize(oauth, "crm", @acme_jon)
+
+      {:ok, _vsn} = WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "first")
+      assert {:ok, "crm"} = sign_in(oauth, "crm", @acme_jon)
+      assert_received {:exchanged, %{"client_id" => "acme-app", "client_secret" => "first"}}
+
+      {:ok, _vsn} = WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "rotated")
+      assert {:ok, "crm"} = sign_in(oauth, "crm", @acme_jon)
+      assert_received {:exchanged, %{"client_secret" => "rotated"}}
+    end
+
+    test "take a client secret only by reference", %{oauth: oauth} do
+      assert {:error, "crm's client_secret must be {:secret, name}"} =
+               WardrikOAuth.add_provider(oauth, "acme", "crm",
                  issuer: GitHub.issuer(),
                  client_id: "acme-app",
                  client_secret: "acme-app-secret"
                )
 
-      refute Keyword.has_key?(WardrikStore.get(store, "providers/acme/crm"), :client_secret)
-      refute inspect(WardrikStore.get(store, "providers/acme/crm")) =~ "acme-app-secret"
-
-      {:ok, url} = WardrikOAuth.authorize(oauth, "acme/crm", @jon)
-      assert URI.decode_query(URI.parse(url).query)["client_id"] == "acme-app"
-
-      {:ok, "acme/crm"} =
-        WardrikOAuth.finish(oauth, %{
-          "state" => state({:authorize, url}),
-          "code" => "c",
-          "iss" => GitHub.issuer()
-        })
-
-      assert_received {:exchanged,
-                       %{"client_id" => "acme-app", "client_secret" => "acme-app-secret"}}
-
-      :ok = WardrikOAuth.remove_provider(oauth, "acme/crm")
-
-      assert WardrikOAuth.ClientSecrets.unseal(%{vault: vault}, "providers/acme/crm") ==
-               nil
+      assert WardrikOAuth.providers(oauth, "acme") |> names() |> Enum.member?("crm") == false
     end
 
     test "keep a registered client's secret sealed in the vault", %{oauth: oauth, store: store} do
-      :ok = WardrikOAuth.add_provider(oauth, "tracker", resource: "https://api.github.test/mcp/")
-      {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @jon)
+      :ok =
+        WardrikOAuth.add_provider(oauth, "acme/@jon", "tracker",
+          resource: "https://api.github.test/mcp/"
+        )
 
-      assert WardrikStore.get(store, "registrations/tracker") == %{
+      {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @acme_jon)
+
+      assert WardrikStore.get(store, "registrations/acme%2F%40jon/tracker") == %{
                "client_id" => "registered-client"
              }
 
@@ -190,11 +210,11 @@ defmodule WardrikOAuthTest do
 
     test "registers Wardrik with a service once, and signs in through it", %{oauth: oauth} do
       assert :ok =
-               WardrikOAuth.add_provider(oauth, "tracker",
+               WardrikOAuth.add_provider(oauth, @deployment, "tracker",
                  resource: "https://api.github.test/mcp/"
                )
 
-      assert "tracker" in WardrikOAuth.providers(oauth)
+      assert "tracker" in names(WardrikOAuth.providers(oauth, "acme"))
 
       assert {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @jon)
       assert URI.decode_query(URI.parse(url).query)["client_id"] == "registered-client"
@@ -213,7 +233,10 @@ defmodule WardrikOAuthTest do
     test "is the client of a service that reads its document by the document's URL", %{
       oauth: oauth
     } do
-      :ok = WardrikOAuth.add_provider(oauth, "documents", issuer: "https://documents.test")
+      :ok =
+        WardrikOAuth.add_provider(oauth, @deployment, "documents",
+          issuer: "https://documents.test"
+        )
 
       assert {:ok, url} = WardrikOAuth.authorize(oauth, "documents", @jon)
 
@@ -259,7 +282,10 @@ defmodule WardrikOAuthTest do
         id: :local_oauth
       )
 
-      :ok = WardrikOAuth.add_provider(:local_oauth, "documents", issuer: "https://documents.test")
+      :ok =
+        WardrikOAuth.add_provider(:local_oauth, @deployment, "documents",
+          issuer: "https://documents.test"
+        )
 
       assert {:ok, url} = WardrikOAuth.authorize(:local_oauth, "documents", @jon)
       assert URI.decode_query(URI.parse(url).query)["client_id"] == "registered-client"
@@ -270,23 +296,33 @@ defmodule WardrikOAuthTest do
 
     test "says why a provider doesn't read, or can't be signed in with", %{oauth: oauth} do
       assert {:error, "github is a provider the app starts with"} =
-               WardrikOAuth.add_provider(oauth, "github",
+               WardrikOAuth.add_provider(oauth, @deployment, "github",
                  resource: "https://api.github.test/mcp/"
                )
 
-      assert {:error, "The nowhere provider needs" <> _} =
-               WardrikOAuth.add_provider(oauth, "nowhere", [])
+      assert {:error, "acme:crm isn't an owner"} =
+               WardrikOAuth.add_provider(oauth, "acme:crm", "github", issuer: GitHub.issuer())
 
-      assert :ok = WardrikOAuth.add_provider(oauth, "accounts", issuer: "https://accounts.test")
+      assert {:error, "The nowhere provider needs" <> _} =
+               WardrikOAuth.add_provider(oauth, "acme", "nowhere", [])
+
+      assert :ok =
+               WardrikOAuth.add_provider(oauth, @deployment, "accounts",
+                 issuer: "https://accounts.test"
+               )
+
       assert {:error, {:no_client, "accounts"}} = WardrikOAuth.authorize(oauth, "accounts", @jon)
     end
 
     test "forgets a provider it's told to", %{oauth: oauth} do
-      :ok = WardrikOAuth.add_provider(oauth, "tracker", resource: "https://api.github.test/mcp/")
+      :ok =
+        WardrikOAuth.add_provider(oauth, "acme", "tracker",
+          resource: "https://api.github.test/mcp/"
+        )
 
-      assert :ok = WardrikOAuth.remove_provider(oauth, "tracker")
-      refute "tracker" in WardrikOAuth.providers(oauth)
-      assert {:error, :not_found} = WardrikOAuth.authorize(oauth, "tracker", @jon)
+      assert :ok = WardrikOAuth.remove_provider(oauth, "acme", "tracker")
+      refute "tracker" in names(WardrikOAuth.providers(oauth, "acme"))
+      assert {:error, :not_found} = WardrikOAuth.authorize(oauth, "tracker", @acme_jon)
     end
   end
 
@@ -460,7 +496,9 @@ defmodule WardrikOAuthTest do
       assert_received {:refreshed, "rt"}
 
       {:ok, json} = WardrikVault.fetch(vault, @jon, "github")
-      assert {:ok, %Token{access_token: "fresh", refresh_token: "rt"}} = Token.decode(json)
+
+      assert {:ok, %Token{access_token: "fresh", refresh_token: "rt", owner: @deployment}} =
+               Token.decode(json)
     end
 
     test "asks again when the refresh token is spent, or there is none", %{vault: vault} do
@@ -485,5 +523,104 @@ defmodule WardrikOAuthTest do
 
       assert {:authorize, _url} = WardrikVault.resolve("github", @jon, vault)
     end
+  end
+
+  describe "providers by owner" do
+    setup %{oauth: oauth, vault: vault} do
+      for {owner, name, id} <- [
+            {"acme", "github", "acme-github"},
+            {"acme", "crm", "acme-crm"},
+            {"globex", "crm", "globex-crm"}
+          ] do
+        :ok =
+          WardrikOAuth.add_provider(oauth, owner, name,
+            issuer: GitHub.issuer(),
+            client_id: id,
+            client_secret: {:secret, "SECRET"}
+          )
+
+        {:ok, _vsn} = WardrikVault.put(vault, %Principal{id: owner}, "SECRET", owner <> "-secret")
+      end
+
+      :ok
+    end
+
+    test "give a person their org's and the deployment's, nearest first", %{oauth: oauth} do
+      providers = WardrikOAuth.providers(oauth, "acme/@jon")
+
+      assert [
+               %Provider{name: "crm", owner: "acme", source: :runtime},
+               %Provider{name: "github", owner: "acme", client_secret: {:secret, "SECRET"}}
+               | deployment
+             ] = providers
+
+      assert names(deployment) ==
+               ~w(copilot github_sealed github_web google linear notion)
+
+      assert Enum.all?(deployment, &(&1.owner == @deployment and &1.source == :config))
+    end
+
+    test "sign a person in with their org's app ahead of the deployment's", %{oauth: oauth} do
+      assert client_id(WardrikOAuth.authorize(oauth, "github", @acme_jon)) == "acme-github"
+      assert client_id(WardrikOAuth.authorize(oauth, "crm", @acme_jon)) == "acme-crm"
+
+      ada = %Principal{id: "initech/@ada"}
+
+      assert {:ok, "https://agents.test/oauth/device/" <> _id} =
+               WardrikOAuth.authorize(oauth, "github", ada)
+
+      assert {:error, :not_found} = WardrikOAuth.authorize(oauth, "crm", ada)
+      refute "crm" in names(WardrikOAuth.providers(oauth, "initech/@ada"))
+    end
+
+    test "record the provider that issued a grant", %{oauth: oauth, vault: vault} do
+      assert {:ok, "crm"} = sign_in(oauth, "crm", @acme_jon)
+
+      {:ok, json} = WardrikVault.fetch(vault, @acme_jon, "crm")
+      assert {:ok, %Token{owner: "acme"}} = Token.decode(json)
+      assert WardrikVault.fetch(vault, %Principal{id: "acme"}, "crm") == {:error, :not_found}
+    end
+
+    test "renew a grant with the provider that issued it", %{oauth: oauth, vault: vault} do
+      :ok =
+        WardrikOAuth.add_provider(oauth, "acme/@jon", "crm",
+          issuer: GitHub.issuer(),
+          client_id: "jon-crm"
+        )
+
+      keep_crm(vault, owner: "acme")
+      assert WardrikVault.resolve("crm", @acme_jon, vault) == {:ok, "fresh"}
+      assert_received {:refreshed_as, "acme-crm", "acme-secret"}
+
+      {:ok, json} = WardrikVault.fetch(vault, @acme_jon, "crm")
+      assert {:ok, %Token{access_token: "fresh", owner: "acme"}} = Token.decode(json)
+
+      :ok = WardrikVault.delete(vault, %Principal{id: "acme"}, "SECRET")
+      keep_crm(vault, owner: "acme")
+      assert {:error, "crm's client_secret" <> _} = WardrikVault.resolve("crm", @acme_jon, vault)
+
+      :ok = WardrikOAuth.remove_provider(oauth, "acme", "crm")
+      keep_crm(vault, owner: "acme")
+      assert {:authorize, url} = WardrikVault.resolve("crm", @acme_jon, vault)
+      assert client_id({:authorize, url}) == "jon-crm"
+      refute_received {:refreshed_as, _id, _secret}
+    end
+
+    test "renew a grant kept before its provider was recorded", %{vault: vault} do
+      keep_crm(vault, [])
+      assert WardrikVault.resolve("crm", @acme_jon, vault) == {:ok, "fresh"}
+      assert_received {:refreshed_as, "acme-crm", "acme-secret"}
+    end
+  end
+
+  defp keep_crm(vault, fields) do
+    {:ok, _vsn} =
+      WardrikVault.put(
+        vault,
+        @acme_jon,
+        "crm",
+        Token.encode(token([access_token: "old", refresh_token: "rt", expires_at: 0] ++ fields)),
+        kind: :grant
+      )
   end
 end

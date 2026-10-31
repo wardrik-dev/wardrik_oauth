@@ -11,33 +11,27 @@ defmodule WardrikOAuth.Renewal do
   alias WardrikOAuth.Token
 
   @doc """
-  Returns the grant's access token, refreshing it first if it has expired.
+  Returns the grant's access token, refreshing it first with `provider` if it has expired.
 
   Returns `:ask` if the principal must sign in again.
   """
-  @spec renew(map(), Provider.t(), Principal.t(), binary()) ::
+  @spec renew(map(), Provider.t(), Principal.t(), Token.t()) ::
           {:ok, String.t()} | :ask | {:error, term()}
-  def renew(settings, provider, principal, value) do
-    case Token.decode(value) do
-      {:ok, token} ->
-        if Token.fresh?(token),
-          do: {:ok, token.access_token},
-          else: refresh(settings, provider, principal)
-
-      {:error, :unreadable} ->
-        :ask
-    end
+  def renew(settings, provider, principal, %Token{} = token) do
+    if Token.fresh?(token),
+      do: {:ok, token.access_token},
+      else: refresh(settings, provider, principal)
   end
 
-  @doc "Marks the grant expired, so the next use refreshes it."
-  @spec expire(map(), Provider.t(), Principal.t()) :: :ok
-  def expire(settings, provider, principal) do
-    locked(provider, principal, fn ->
-      with {:ok, token, vsn} <- current(settings, provider, principal) do
+  @doc "Marks the grant `name` expired, so the next use refreshes it."
+  @spec expire(map(), String.t(), Principal.t()) :: :ok
+  def expire(settings, name, principal) do
+    locked(name, principal, fn ->
+      with {:ok, token, vsn} <- current(settings, name, principal) do
         WardrikVault.put(
           settings.vault,
           principal,
-          provider.name,
+          name,
           Token.encode(Token.expire(token)),
           kind: :grant,
           if_vsn: vsn
@@ -49,8 +43,8 @@ defmodule WardrikOAuth.Renewal do
   end
 
   defp refresh(settings, provider, principal) do
-    locked(provider, principal, fn ->
-      case current(settings, provider, principal) do
+    locked(provider.name, principal, fn ->
+      case current(settings, provider.name, principal) do
         {:ok, token, vsn} -> refreshed(settings, provider, principal, token, vsn)
         :none -> :ask
       end
@@ -68,7 +62,7 @@ defmodule WardrikOAuth.Renewal do
   defp exchange(settings, provider, principal, token, vsn) do
     case post_refresh(settings, provider, token) do
       {:ok, fresh} ->
-        fresh = Token.carry_refresh(fresh, token)
+        fresh = %{Token.carry_refresh(fresh, token) | owner: provider.owner}
 
         WardrikVault.put(settings.vault, principal, provider.name, Token.encode(fresh),
           kind: :grant,
@@ -96,9 +90,8 @@ defmodule WardrikOAuth.Renewal do
          do: Token.from_response(status, body, token.token_endpoint)
   end
 
-  defp current(settings, provider, principal) do
-    with {:ok, :grant, value, vsn} <-
-           WardrikVault.lookup(settings.vault, principal, provider.name),
+  defp current(settings, name, principal) do
+    with {:ok, :grant, value, vsn} <- WardrikVault.lookup(settings.vault, principal, name),
          {:ok, token} <- Token.decode(value) do
       {:ok, token, vsn}
     else
@@ -106,7 +99,7 @@ defmodule WardrikOAuth.Renewal do
     end
   end
 
-  defp locked(%Provider{name: name}, %Principal{id: id}, fun) do
+  defp locked(name, %Principal{id: id}, fun) do
     case :global.trans({{WardrikOAuth, name, id}, self()}, fun, [node() | Node.list()], 20) do
       :aborted -> {:error, :renewing}
       result -> result

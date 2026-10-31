@@ -71,6 +71,7 @@ defmodule WardrikOAuth.MixProject do
   defp deps do
     [
       sibling(:wardrik_core),
+      sibling(:wardrik_protocol),
       sibling(:wardrik_vault),
       {:nimble_options, "~> 1.1"},
       {:req, "~> 0.5"},

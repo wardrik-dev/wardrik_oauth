@@ -101,6 +101,7 @@ defmodule WardrikOAuth.GitHub do
          test
        ) do
     send(test, {:refreshed, form["refresh_token"]})
+    send(test, {:refreshed_as, form["client_id"], form["client_secret"]})
 
     case form["refresh_token"] do
       "spent" -> Req.Test.json(conn, %{"error" => "bad_refresh_token"})

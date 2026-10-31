@@ -16,16 +16,24 @@ defmodule WardrikOAuth do
   Mount `WardrikOAuth.Plug` at `page` to finish sign-ins. See `WardrikOAuth.Provider` for provider
   options.
 
-  A provider's `client_secret` may be `{:secret, name}`. It's read from the vault's deployment
-  secrets each time a sign-in needs it, so a new one takes effect at once. See
-  `WardrikVault.value/2`.
+  Providers belong to owners. Those in `:providers` are the deployment's, and `add_provider/4`
+  adds an org's or a person's. A principal signs in with the nearest provider of a name along
+  `Wardrik.Owners.chain/1`.
+
+  A provider's `client_secret` may be `{:secret, name}`. It's read from its owner's vault secrets
+  each time it's needed, so a new one takes effect at once.
+
+  Grants never fall back. Each belongs to the principal who signed in, and is renewed with the
+  provider that issued it. If that provider is gone, the principal signs in again.
   """
 
   @behaviour WardrikVault.Grants
 
   use Supervisor
 
-  alias WardrikOAuth.ClientSecrets
+  alias Wardrik.Owners
+  alias Wardrik.Resource
+  alias WardrikCore.Principal
   alias WardrikOAuth.Flow
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Registration
@@ -96,12 +104,18 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Adds the provider `name` at runtime, on every node.
+  Adds `owner`'s provider `name` at runtime, on every node.
 
-      :ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
+      :ok =
+        WardrikOAuth.add_provider(MyApp.OAuth, "acme", "linear",
+          resource: "https://mcp.linear.app/mcp",
+          client_id: "acme-linear",
+          client_secret: {:secret, "LINEAR_CLIENT_SECRET"}
+        )
 
-  Takes the same options as a provider in `:providers`. The `client_secret` is sealed in the vault,
-  not kept in the store.
+  `owner` is `deployment`, an org like `acme`, or a person like `acme/@jon`. Takes the same
+  options as a provider in `:providers`, but `client_secret` must be `{:secret, name}`, read from
+  `owner`'s vault secrets.
 
   Without a `client_id`, Wardrik gets one the first time someone signs in:
 
@@ -109,20 +123,27 @@ defmodule WardrikOAuth do
        the URL of the document `WardrikOAuth.Plug` serves.
     2. Otherwise, Wardrik registers itself with the service.
 
-  Returns `{:error, reason}` for invalid options, or a name given in `:providers`.
+  Returns `{:error, reason}` for invalid options, a `client_secret` given as is, or the
+  deployment's provider of a name in `:providers`.
   """
-  @spec add_provider(atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
-  def add_provider(oauth, name, opts) when is_binary(name) do
+  @spec add_provider(atom(), Owners.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def add_provider(oauth, owner, name, opts) when is_binary(owner) and is_binary(name) do
     settings = settings(oauth)
     Provider.new(name, opts)
-    {secret, kept} = Keyword.pop(opts, :client_secret)
 
-    if Map.has_key?(settings.providers, name) do
-      {:error, "#{name} is a provider the app starts with"}
-    else
-      with :ok <- ClientSecrets.seal(settings, provider_key(name), secret),
-           {:ok, _vsn} <- WardrikStore.put(settings.store, provider_key(name), kept),
-           do: :ok
+    cond do
+      Owners.parse(owner) == :error ->
+        {:error, "#{owner} isn't an owner"}
+
+      is_binary(opts[:client_secret]) ->
+        {:error, "#{name}'s client_secret must be {:secret, name}"}
+
+      Map.has_key?(configured(settings, owner), name) ->
+        {:error, "#{name} is a provider the app starts with"}
+
+      true ->
+        with {:ok, _vsn} <- WardrikStore.put(settings.store, provider_key(owner, name), opts),
+             do: :ok
     end
   rescue
     error in [ArgumentError, NimbleOptions.ValidationError] -> {:error, Exception.message(error)}
@@ -136,42 +157,42 @@ defmodule WardrikOAuth do
   @spec client_document(atom()) :: map()
   def client_document(oauth), do: oauth |> settings() |> Registration.document()
 
-  @doc "Removes the provider `name`, added at runtime, and the client registered for it."
-  @spec remove_provider(atom(), String.t()) :: :ok | {:error, term()}
-  def remove_provider(oauth, name) do
+  @doc "Removes `owner`'s provider `name`, added at runtime, and the client registered for it."
+  @spec remove_provider(atom(), Owners.t(), String.t()) :: :ok | {:error, term()}
+  def remove_provider(oauth, owner, name) do
     settings = settings(oauth)
 
-    with :ok <- WardrikStore.delete(settings.store, provider_key(name)),
-         :ok <- ClientSecrets.forget(settings, provider_key(name)),
-         do: Registration.forget(settings, name)
-  end
-
-  @doc "Returns the names of the providers someone can sign in with."
-  @spec providers(atom()) :: [String.t()]
-  def providers(oauth) do
-    settings = settings(oauth)
-
-    added =
-      settings.store
-      |> WardrikStore.keys("providers/")
-      |> Enum.map(&String.replace_prefix(&1, "providers/", ""))
-
-    Enum.sort(Map.keys(settings.providers) ++ added)
+    with :ok <- WardrikStore.delete(settings.store, provider_key(owner, name)),
+         do: Registration.forget(settings, owner, name)
   end
 
   @doc """
-  Returns the URL where `principal` signs in with the provider `name`.
+  Returns the providers `owner` can sign in with, nearest first along `Wardrik.Owners.chain/1`.
+
+      WardrikOAuth.providers(MyApp.OAuth, "acme/@jon")
+      #=> [%WardrikOAuth.Provider{name: "linear", owner: "acme", source: :runtime, ...}, ...]
+
+  Only the nearest provider of each name is given. A `client_secret` is as it was given, not read.
+  """
+  @spec providers(atom(), Owners.t()) :: [Provider.t()]
+  def providers(oauth, owner) do
+    settings = settings(oauth)
+
+    owner
+    |> Owners.chain()
+    |> Enum.flat_map(&owned(settings, &1))
+    |> Enum.uniq_by(& &1.name)
+  end
+
+  @doc """
+  Returns the URL where `principal` signs in with the provider `name`, the nearest along
+  `Wardrik.Owners.chain/1`.
 
   Starts a sign-in, or returns the URL of the one already under way.
   """
-  @spec authorize(atom(), String.t(), WardrikCore.Principal.t()) ::
-          {:ok, String.t()} | {:error, term()}
+  @spec authorize(atom(), String.t(), Principal.t()) :: {:ok, String.t()} | {:error, term()}
   def authorize(oauth, name, principal) do
-    settings = settings(oauth)
-
-    with {:ok, provider} <- provider(settings, name),
-         {:authorize, url} <- Flow.begin(settings, provider, principal),
-         do: {:ok, url}
+    with {:authorize, url} <- begin(settings(oauth), name, principal), do: {:ok, url}
   end
 
   @doc """
@@ -219,34 +240,21 @@ defmodule WardrikOAuth do
   end
 
   @impl WardrikVault.Grants
-  def ask(_vault, name, principal, oauth) do
-    settings = settings(oauth)
-
-    with {:ok, provider} <- provider(settings, name),
-         do: Flow.begin(settings, provider, principal)
-  end
+  def ask(_vault, name, principal, oauth), do: begin(settings(oauth), name, principal)
 
   @impl WardrikVault.Grants
   def renew(_vault, name, principal, %{value: value}, oauth) do
     settings = settings(oauth)
 
-    with {:ok, provider} <- provider(settings, name) do
-      case Renewal.renew(settings, provider, principal, value) do
-        :ask -> Flow.begin(settings, provider, principal)
-        renewed -> renewed
-      end
+    case renewed(settings, name, principal, value) do
+      :ask -> begin(settings, name, principal)
+      renewed -> renewed
     end
   end
 
   @impl WardrikVault.Grants
-  def refused(_vault, name, principal, oauth) do
-    settings = settings(oauth)
-
-    with {:ok, provider} <- provider(settings, name),
-         do: Renewal.expire(settings, provider, principal)
-
-    :ok
-  end
+  def refused(_vault, name, principal, oauth),
+    do: Renewal.expire(settings(oauth), name, principal)
 
   @doc false
   def keep(settings, provider, principal, %Token{} = token) do
@@ -256,7 +264,7 @@ defmodule WardrikOAuth do
       settings.vault,
       principal,
       provider.name,
-      Token.encode(token),
+      Token.encode(%{token | owner: provider.owner}),
       [kind: :grant] ++ condition
     )
   end
@@ -301,42 +309,85 @@ defmodule WardrikOAuth do
 
   defp registry(oauth), do: Module.concat(oauth, Registry)
 
-  defp provider(settings, name) do
-    case Map.fetch(settings.providers, name) do
-      {:ok, provider} -> configured(settings, provider)
-      :error -> added(settings, name)
+  defp begin(settings, name, principal) do
+    with {:ok, provider} <- resolve(settings, name, principal),
+         do: Flow.begin(settings, provider, principal)
+  end
+
+  defp renewed(settings, name, principal, value) do
+    with {:ok, token} <- Token.decode(value),
+         {:ok, provider} <- issuer(settings, name, principal, token) do
+      Renewal.renew(settings, provider, principal, token)
+    else
+      {:error, reason} when reason in [:unreadable, :not_found] -> :ask
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp configured(settings, %Provider{client_secret: secret} = provider) do
-    case WardrikVault.value(settings.vault, secret) do
-      {:ok, secret} ->
-        {:ok, Registration.registered(settings, %{provider | client_secret: secret})}
+  # Tokens kept before the issuing provider was recorded resolve as a sign-in would.
+  defp issuer(settings, name, principal, %Token{owner: nil}),
+    do: resolve(settings, name, principal)
+
+  defp issuer(settings, name, _principal, %Token{owner: owner}),
+    do: provider(settings, owner, name)
+
+  defp resolve(settings, name, %Principal{id: id}) do
+    id
+    |> Owners.chain()
+    |> Enum.find_value({:error, :not_found}, fn owner ->
+      case provider(settings, owner, name) do
+        {:error, :not_found} -> nil
+        found -> found
+      end
+    end)
+  end
+
+  defp provider(settings, owner, name) do
+    with {:ok, provider} <- defined(settings, owner, name), do: usable(settings, provider)
+  end
+
+  defp defined(settings, owner, name) do
+    with :error <- Map.fetch(configured(settings, owner), name) do
+      case WardrikStore.get(settings.store, provider_key(owner, name)) do
+        nil -> {:error, :not_found}
+        opts -> {:ok, added(owner, name, opts)}
+      end
+    end
+  end
+
+  defp owned(settings, owner) do
+    prefix = provider_key(owner, "")
+
+    added =
+      for {key, opts, _vsn} <- WardrikStore.entries(settings.store, prefix),
+          do: added(owner, String.replace_prefix(key, prefix, ""), opts)
+
+    Enum.sort_by(Map.values(configured(settings, owner)) ++ added, & &1.name)
+  end
+
+  defp configured(settings, owner),
+    do: if(owner == Resource.deployment(), do: settings.providers, else: %{})
+
+  defp added(owner, name, opts),
+    do: %{Provider.new(name, opts) | owner: owner, source: :runtime}
+
+  defp usable(settings, %Provider{client_secret: secret} = provider) do
+    case client_secret(settings, provider) do
+      {:ok, value} ->
+        {:ok, Registration.registered(settings, %{provider | client_secret: value})}
 
       {:error, _reason} ->
-        {:error, "#{provider.name}'s client_secret, #{inspect(secret)}, isn't sealed"}
+        {:error,
+         "#{provider.name}'s client_secret, #{inspect(secret)}, isn't sealed for #{provider.owner}"}
     end
   end
 
-  defp added(settings, name) do
-    case WardrikStore.get(settings.store, provider_key(name)) do
-      nil ->
-        {:error, :not_found}
+  defp client_secret(settings, %Provider{client_secret: {:secret, name}, owner: owner}),
+    do: WardrikVault.fetch(settings.vault, %Principal{id: owner}, name)
 
-      opts ->
-        {:ok,
-         Registration.registered(settings, Provider.new(name, unsealed(settings, name, opts)))}
-    end
-  end
+  defp client_secret(_settings, %Provider{client_secret: secret}), do: {:ok, secret}
 
-  defp unsealed(settings, name, opts) do
-    case ClientSecrets.unseal(settings, provider_key(name)) do
-      nil -> opts
-      secret -> Keyword.put(opts, :client_secret, secret)
-    end
-  end
-
-  defp provider_key(name), do: "providers/" <> name
+  defp provider_key(owner, name), do: "providers/" <> Provider.path(owner, name)
 
   defp over_current(vault, principal, name) do
     case WardrikVault.lookup(vault, principal, name) do

@@ -2,7 +2,7 @@ defmodule WardrikOAuth.Registration do
   @moduledoc """
   Makes Wardrik a client of an authorization server it has no `client_id` for.
 
-  This happens once. The client is kept in the store for every node.
+  This happens once for each provider, by owner. The client is kept in the store for every node.
 
     1. If the server reads Client ID Metadata Documents and `page` is `https`, the `client_id` is
        `{page}/client`. Nothing is registered.
@@ -23,7 +23,7 @@ defmodule WardrikOAuth.Registration do
     do: {:ok, provider}
 
   def client(settings, provider, metadata) do
-    case WardrikStore.get(settings.store, key(provider.name)) do
+    case WardrikStore.get(settings.store, key(provider)) do
       nil -> register(settings, provider, metadata)
       registered -> {:ok, applied(settings, provider, registered)}
     end
@@ -34,17 +34,17 @@ defmodule WardrikOAuth.Registration do
   def registered(_settings, %Provider{client_id: id} = provider) when is_binary(id), do: provider
 
   def registered(settings, provider) do
-    case WardrikStore.get(settings.store, key(provider.name)) do
+    case WardrikStore.get(settings.store, key(provider)) do
       nil -> provider
       registered -> applied(settings, provider, registered)
     end
   end
 
-  @doc "Deletes the client registered for the provider `name`."
-  @spec forget(map(), String.t()) :: :ok | {:error, term()}
-  def forget(settings, name) do
-    with :ok <- WardrikStore.delete(settings.store, key(name)),
-         do: ClientSecrets.forget(settings, key(name))
+  @doc "Deletes the client registered for `owner`'s provider `name`."
+  @spec forget(map(), Wardrik.Owners.t(), String.t()) :: :ok | {:error, term()}
+  def forget(settings, owner, name) do
+    with :ok <- WardrikStore.delete(settings.store, key(owner, name)),
+         do: ClientSecrets.forget(settings, key(owner, name))
   end
 
   @doc "Returns the Client ID Metadata Document served at `{page}/client`."
@@ -79,7 +79,7 @@ defmodule WardrikOAuth.Registration do
   defp kept(settings, provider, registered) do
     {secret, client} = Map.pop(registered, "client_secret")
 
-    case WardrikStore.put(settings.store, key(provider.name), client, if_vsn: nil) do
+    case WardrikStore.put(settings.store, key(provider), client, if_vsn: nil) do
       {:ok, _vsn} -> sealed(settings, provider, client["client_id"], secret)
       {:error, :conflict} -> {:ok, registered(settings, provider)}
       {:error, reason} -> {:error, reason}
@@ -87,7 +87,7 @@ defmodule WardrikOAuth.Registration do
   end
 
   defp sealed(settings, provider, id, secret) do
-    with :ok <- ClientSecrets.seal(settings, key(provider.name), secret),
+    with :ok <- ClientSecrets.seal(settings, key(provider), secret),
          do: {:ok, applied(provider, id, secret)}
   end
 
@@ -107,7 +107,7 @@ defmodule WardrikOAuth.Registration do
   defp grant_types(:browser), do: ["authorization_code", "refresh_token"]
 
   defp applied(settings, provider, %{"client_id" => id}),
-    do: applied(provider, id, ClientSecrets.unseal(settings, key(provider.name)))
+    do: applied(provider, id, ClientSecrets.unseal(settings, key(provider)))
 
   defp applied(provider, id, secret), do: %{provider | client_id: id, client_secret: secret}
 
@@ -120,5 +120,6 @@ defmodule WardrikOAuth.Registration do
     end
   end
 
-  defp key(name), do: "registrations/" <> name
+  defp key(%Provider{owner: owner, name: name}), do: key(owner, name)
+  defp key(owner, name), do: "registrations/" <> Provider.path(owner, name)
 end
