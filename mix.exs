@@ -72,6 +72,7 @@ defmodule WardrikOAuth.MixProject do
     [
       sibling(:wardrik_core),
       sibling(:wardrik_vault),
+      {:nimble_options, "~> 1.1"},
       {:req, "~> 0.5"},
       {:plug, "~> 1.16"},
       {:telemetry, "~> 1.0"},
