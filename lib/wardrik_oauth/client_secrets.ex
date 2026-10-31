@@ -1,9 +1,8 @@
 defmodule WardrikOAuth.ClientSecrets do
   @moduledoc """
-  Seals client secrets in the vault, not the store.
+  Seals the secrets of clients Wardrik registers in the vault, not the store.
 
-  Covers providers added at runtime and clients Wardrik registers. Secrets are kept under a
-  principal of their own that no agent acts as.
+  Secrets are kept under a principal of their own that no agent acts as.
   """
 
   alias WardrikCore.Principal

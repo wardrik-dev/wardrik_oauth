@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Providers belong to an owner: the deployment, an org or a person. A principal signs in with the
+  nearest along `Wardrik.Owners.chain/1`. `add_provider/4`, `remove_provider/3` and
+  `providers/2` take the owner, and `providers/2` returns `WardrikOAuth.Provider` structs.
+- A runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault
+  secrets each time it's needed.
+- Each grant records the owner of the provider that issued it, and is renewed with that provider.
+  Grants kept before resolve along the chain.
+
 ## 0.1.0-rc.1 (2026-10-30)
 
 - Sign-ins that give WardrikCore agents a person's accounts, each grant sealed in WardrikVault.

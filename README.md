@@ -94,8 +94,8 @@ A provider needs an `issuer`, a `resource`, or both endpoints.
 
 ### Secrets in the vault
 
-A `client_secret` of `{:secret, name}` is read from the vault's deployment secrets each time a
-sign-in needs it. Changing it takes no restart:
+A `client_secret` of `{:secret, name}` is read from the provider's owner's vault secrets each
+time it's needed. Providers in `:providers` are the deployment's. Changing it takes no restart:
 
 ```elixir
 WardrikVault.put(MyApp.Vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", secret)
@@ -165,19 +165,32 @@ end
 
 ## Add providers at runtime
 
-Providers added at runtime are kept in the store, so every node sees them:
+Providers added at runtime belong to an owner: `deployment`, an org like `acme`, or a person like
+`acme/@maria`. They're kept in the store, so every node sees them:
 
 ```elixir
-:ok = WardrikOAuth.add_provider(MyApp.OAuth, "linear", resource: "https://mcp.linear.app/mcp")
+:ok =
+  WardrikOAuth.add_provider(MyApp.OAuth, "acme", "linear",
+    resource: "https://mcp.linear.app/mcp",
+    client_id: "acme-linear",
+    client_secret: {:secret, "LINEAR_CLIENT_SECRET"}
+  )
 
-WardrikOAuth.authorize(MyApp.OAuth, "linear", maria)
-#=> {:ok, "https://mcp.linear.app/authorize?client_id=...&state=..."}
+WardrikOAuth.authorize(MyApp.OAuth, "linear", %WardrikCore.Principal{id: "acme/@maria"})
+#=> {:ok, "https://mcp.linear.app/authorize?client_id=acme-linear&state=..."}
 
-WardrikOAuth.providers(MyApp.OAuth)
-#=> ["github", "google", "linear"]
+WardrikOAuth.providers(MyApp.OAuth, "acme/@maria")
+#=> [%WardrikOAuth.Provider{name: "linear", owner: "acme", source: :runtime, ...}, ...]
 
-:ok = WardrikOAuth.remove_provider(MyApp.OAuth, "linear")
+:ok = WardrikOAuth.remove_provider(MyApp.OAuth, "acme", "linear")
 ```
+
+A principal signs in with the nearest provider of a name along `Wardrik.Owners.chain/1`, so
+`acme`'s `linear` comes ahead of the deployment's for Maria, and isn't offered outside `acme`. A
+runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault secrets.
+
+Grants don't fall back. Each belongs to the principal who signed in, and is renewed with the
+provider that issued it. If that provider is removed, the principal signs in again.
 
 A provider without a `client_id` gets one the first time someone signs in. See
 [Without a client ID](#without-a-client-id). The client is kept in the store, so this happens

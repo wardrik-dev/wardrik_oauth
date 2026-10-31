@@ -20,12 +20,15 @@ defmodule WardrikOAuth.Provider do
               type: :string,
               doc: """
               Your OAuth app's client ID. Without it, Wardrik becomes the client where the
-              service allows. See `WardrikOAuth.add_provider/3`.
+              service allows. See `WardrikOAuth.add_provider/4`.
               """
             ],
             client_secret: [
               type: {:or, [:string, {:tuple, [{:in, [:secret]}, :string]}]},
-              doc: "The client secret, or `{:secret, name}` to read it from the vault."
+              doc: """
+              `{:secret, name}`, read from the owner's vault secrets each time it's needed. A
+              provider in `:providers` may also give the secret itself.
+              """
             ],
             client_auth: [
               type: {:in, [:post, :basic]},
@@ -64,7 +67,13 @@ defmodule WardrikOAuth.Provider do
   #{NimbleOptions.docs(@schema)}
 
   A provider needs an `:issuer`, a `:resource`, or both endpoints.
+
+  Each belongs to an `owner`: `deployment`, an org like `acme`, or a person like `acme/@jon`.
+  Providers in `:providers` are the deployment's, with `source: :config`. Those added with
+  `WardrikOAuth.add_provider/4` have `source: :runtime`.
   """
+
+  alias Wardrik.Resource
 
   @own_params ~w(response_type client_id redirect_uri scope state code_challenge code_challenge_method resource)
 
@@ -72,6 +81,8 @@ defmodule WardrikOAuth.Provider do
   @enforce_keys [:name]
   defstruct [
     :name,
+    :owner,
+    :source,
     :issuer,
     :resource,
     :client_id,
@@ -87,6 +98,8 @@ defmodule WardrikOAuth.Provider do
   @typedoc "An OAuth app a principal can grant access to."
   @type t() :: %__MODULE__{
           name: String.t(),
+          owner: Wardrik.Owners.t(),
+          source: :config | :runtime,
           issuer: String.t() | nil,
           resource: String.t() | nil,
           client_id: String.t() | nil,
@@ -100,7 +113,7 @@ defmodule WardrikOAuth.Provider do
         }
 
   @doc """
-  Builds a provider from its name and options.
+  Builds the deployment's provider `name` from its options.
 
   Raises `NimbleOptions.ValidationError` on invalid options, or `ArgumentError` if nothing names
   the server.
@@ -108,7 +121,8 @@ defmodule WardrikOAuth.Provider do
   @spec new(atom() | String.t(), keyword()) :: t()
   def new(name, opts) do
     opts = NimbleOptions.validate!(opts, @schema)
-    provider = struct!(__MODULE__, [name: to_string(name)] ++ opts)
+    fields = [name: to_string(name), owner: Resource.deployment(), source: :config]
+    provider = struct!(__MODULE__, fields ++ opts)
 
     if findable?(provider),
       do: provider,
@@ -118,6 +132,10 @@ defmodule WardrikOAuth.Provider do
           "The #{name} provider needs an :issuer, a :resource, or its endpoints"
         )
   end
+
+  @doc false
+  @spec path(Wardrik.Owners.t(), String.t()) :: String.t()
+  def path(owner, name), do: URI.encode_www_form(owner) <> "/" <> name
 
   @doc "Returns whether the provider names both endpoints, so none need discovering."
   @spec endpoints?(t()) :: boolean()
