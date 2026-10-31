@@ -1,4 +1,53 @@
 defmodule WardrikOAuth.Provider do
+  @schema NimbleOptions.new!(
+            issuer: [
+              type: :string,
+              doc: "The authorization server, whose metadata names its endpoints."
+            ],
+            resource: [
+              type: :string,
+              doc: "The API or MCP server the token is for. Finds the issuer if none is given."
+            ],
+            authorization_endpoint: [
+              type: :string,
+              doc: "Where people sign in, for a service without metadata."
+            ],
+            token_endpoint: [
+              type: :string,
+              doc: "Where codes become tokens, for a service without metadata."
+            ],
+            client_id: [
+              type: :string,
+              doc: """
+              Your OAuth app's client ID. Without it, Wardrik becomes the client where the
+              service allows. See `WardrikOAuth.add_provider/3`.
+              """
+            ],
+            client_secret: [
+              type: {:or, [:string, {:tuple, [{:in, [:secret]}, :string]}]},
+              doc: "The client secret, or `{:secret, name}` to read it from the vault."
+            ],
+            client_auth: [
+              type: {:in, [:post, :basic]},
+              default: :post,
+              doc: "`:post` sends the secret in the form, `:basic` as HTTP Basic."
+            ],
+            scopes: [type: {:list, :string}, default: [], doc: "The scopes to ask for."],
+            flow: [
+              type: {:in, [:browser, :device]},
+              default: :browser,
+              doc: "How people sign in."
+            ],
+            authorization_params: [
+              type: {:custom, __MODULE__, :params, []},
+              default: %{},
+              doc: """
+              Extra parameters for a browser sign-in, as `%{access_type: "offline"}`. Can't set
+              the ones Wardrik sends itself.
+              """
+            ]
+          )
+
   @moduledoc """
   An OAuth app with a service. It has the same name as the credential it grants.
 
@@ -12,23 +61,12 @@ defmodule WardrikOAuth.Provider do
 
   ## Options
 
-    * `:issuer` - the authorization server, whose metadata names its endpoints.
-    * `:resource` - the API or MCP server the token is for. Used to discover the issuer if none is
-      given.
-    * `:authorization_endpoint`, `:token_endpoint` - the endpoints, for a service without
-      metadata.
-    * `:client_id` - your OAuth app's client ID. Without it, Wardrik becomes the client where the
-      service allows. See `WardrikOAuth.add_provider/3`.
-    * `:client_secret` - the client secret, or `{:secret, name}` to read it from the vault.
-    * `:client_auth` - `:post` to send the secret in the form, or `:basic` for HTTP Basic.
-      `:post` unless set.
-    * `:scopes` - scopes to ask for. `[]` unless set.
-    * `:flow` - `:browser` or `:device`. `:browser` unless set.
-    * `:authorization_params` - extra parameters for a browser sign-in, as
-      `%{access_type: "offline"}`. Can't set the parameters Wardrik sends itself.
+  #{NimbleOptions.docs(@schema)}
 
   A provider needs an `:issuer`, a `:resource`, or both endpoints.
   """
+
+  @own_params ~w(response_type client_id redirect_uri scope state code_challenge code_challenge_method resource)
 
   @derive {Inspect, except: [:client_secret]}
   @enforce_keys [:name]
@@ -61,30 +99,15 @@ defmodule WardrikOAuth.Provider do
           authorization_params: %{optional(String.t()) => String.t()}
         }
 
-  @options [
-    :issuer,
-    :resource,
-    :client_id,
-    :client_secret,
-    :authorization_endpoint,
-    :token_endpoint,
-    scopes: [],
-    flow: :browser,
-    client_auth: :post,
-    authorization_params: %{}
-  ]
+  @doc """
+  Builds a provider from its name and options.
 
-  @own_params ~w(response_type client_id redirect_uri scope state code_challenge code_challenge_method resource)
-
-  @doc "Builds a provider from its name and options. Raises `ArgumentError` on invalid options."
+  Raises `NimbleOptions.ValidationError` on invalid options, or `ArgumentError` if nothing names
+  the server.
+  """
   @spec new(atom() | String.t(), keyword()) :: t()
   def new(name, opts) do
-    opts =
-      opts
-      |> Keyword.validate!(@options)
-      |> Keyword.update(:authorization_params, %{}, &params!/1)
-      |> Keyword.update!(:client_auth, &client_auth!/1)
-
+    opts = NimbleOptions.validate!(opts, @schema)
     provider = struct!(__MODULE__, [name: to_string(name)] ++ opts)
 
     if findable?(provider),
@@ -104,17 +127,15 @@ defmodule WardrikOAuth.Provider do
   defp findable?(%__MODULE__{issuer: nil, resource: nil} = provider), do: endpoints?(provider)
   defp findable?(_provider), do: true
 
-  defp client_auth!(how) when how in [:post, :basic], do: how
-
-  defp client_auth!(how),
-    do: raise(ArgumentError, "client_auth is :post or :basic, not #{inspect(how)}")
-
-  defp params!(params) do
+  @doc false
+  def params(params) when is_map(params) or is_list(params) do
     params = Map.new(params, fn {key, value} -> {to_string(key), to_string(value)} end)
 
-    case Enum.filter(Map.keys(params), fn key -> key in @own_params end) do
-      [] -> params
-      own -> raise ArgumentError, "authorization_params can't set #{Enum.join(own, ", ")}"
+    case Enum.filter(Map.keys(params), &(&1 in @own_params)) do
+      [] -> {:ok, params}
+      own -> {:error, "authorization_params can't set #{Enum.join(own, ", ")}"}
     end
   end
+
+  def params(params), do: {:error, "authorization_params is a map, not #{inspect(params)}"}
 end
