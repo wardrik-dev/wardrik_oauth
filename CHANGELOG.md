@@ -1,14 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-rc.2 (2026-10-31)
 
 - Providers belong to an owner: the deployment, an org or a person. A principal signs in with the
-  nearest along `Wardrik.Owners.chain/1`. `add_provider/4`, `remove_provider/3` and
-  `providers/2` take the owner, and `providers/2` returns `WardrikOAuth.Provider` structs.
-- A runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault
-  secrets each time it's needed.
+  nearest of a name along `Wardrik.Owners.chain/1`.
+- A runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault each
+  time it's needed.
 - Each grant records the owner of the provider that issued it, and is renewed with that provider.
-  Grants kept before resolve along the chain.
+  Grants kept by rc.1 resolve along the chain.
+- Provider and start options are validated with NimbleOptions, documented from the schema.
+
+### Breaking
+
+- `add_provider/4`, `remove_provider/3` and `providers/2` take the owner, and `providers/2`
+  returns `WardrikOAuth.Provider` structs.
 
 ## 0.1.0-rc.1 (2026-10-30)
 
