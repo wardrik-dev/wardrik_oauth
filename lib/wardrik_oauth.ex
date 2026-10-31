@@ -32,43 +32,65 @@ defmodule WardrikOAuth do
   alias WardrikOAuth.Renewal
   alias WardrikOAuth.Token
 
+  @schema NimbleOptions.new!(
+            name: [type: :atom, required: true, doc: "The name functions reach it by."],
+            vault: [type: :any, required: true, doc: "The `WardrikVault` grants are sealed in."],
+            store: [
+              type: :any,
+              required: true,
+              doc: "The `WardrikStore` for providers added at runtime and registered clients."
+            ],
+            page: [
+              type: :string,
+              required: true,
+              doc: """
+              The URL `WardrikOAuth.Plug` is mounted at, as `"https://agents.example.com/oauth"`.
+              """
+            ],
+            providers: [
+              type: {:list, {:tuple, [{:or, [:atom, :string]}, :keyword_list]}},
+              default: [],
+              doc: "Providers to start with, by name. See `WardrikOAuth.Provider`."
+            ],
+            on_granted: [
+              type: {:or, [:mfa, nil]},
+              default: nil,
+              doc: """
+              `{module, function, args}` called with the provider's name and the principal, then
+              `args`, after each grant.
+              """
+            ],
+            client_name: [
+              type: :string,
+              default: "Wardrik",
+              doc: "The name a service shows for a client Wardrik registers."
+            ],
+            req_options: [
+              type: :keyword_list,
+              default: [],
+              doc: "Extra options for every `Req` request."
+            ],
+            check: [
+              type: {:or, [{:fun, 1}, nil]},
+              default: nil,
+              doc: """
+              Called on each URL before a request is sent, returning `:ok` or `{:error, reason}`.
+              Use one when users add providers by URL. Without it, any `https` URL, and `http` on
+              localhost, is reached.
+              """
+            ]
+          )
+
   @doc """
   Starts `WardrikOAuth`.
 
   ## Options
 
-    * `:name` - required. The name functions reach it by.
-    * `:vault` - required. The `WardrikVault` grants are sealed in.
-    * `:store` - required. The `WardrikStore` for providers added at runtime and registered
-      clients.
-    * `:page` - required. The URL `WardrikOAuth.Plug` is mounted at, as
-      `"https://agents.example.com/oauth"`.
-    * `:providers` - providers to start with, as a keyword list of name and options. See
-      `WardrikOAuth.Provider`. `[]` unless set.
-    * `:on_granted` - `{module, function, args}` called with the provider's name and the principal,
-      then `args`, after each grant.
-    * `:client_name` - the name a service shows for a client Wardrik registers. `"Wardrik"`
-      unless set.
-    * `:req_options` - extra options for every `Req` request.
-    * `:check` - a function called on each URL before a request is sent. It returns `:ok` or
-      `{:error, reason}`. Use one when users add providers by URL. Without it, any `https` URL,
-      and `http` on localhost, is reached.
+  #{NimbleOptions.docs(@schema)}
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
-    opts =
-      Keyword.validate!(opts, [
-        :name,
-        :vault,
-        :store,
-        :page,
-        providers: [],
-        on_granted: nil,
-        client_name: "Wardrik",
-        req_options: [],
-        check: nil
-      ])
-
+    opts = NimbleOptions.validate!(opts, @schema)
     name = Keyword.fetch!(opts, :name)
     Supervisor.start_link(__MODULE__, Map.new(opts), name: name)
   end
@@ -103,7 +125,7 @@ defmodule WardrikOAuth do
            do: :ok
     end
   rescue
-    error in ArgumentError -> {:error, Exception.message(error)}
+    error in [ArgumentError, NimbleOptions.ValidationError] -> {:error, Exception.message(error)}
   end
 
   @doc """

@@ -36,13 +36,19 @@ defmodule WardrikOAuth.PartsTest do
   end
 
   test "sends a secret in the form or a Basic header, and no other way" do
-    assert_raise ArgumentError, ~r/client_auth is :post or :basic/, fn ->
+    assert_raise NimbleOptions.ValidationError, ~r/:client_auth.*\[:post, :basic\]/, fn ->
       Provider.new(:test, issuer: @issuer, client_id: "client", client_auth: :jwt)
     end
   end
 
+  test "refuses an option it doesn't take" do
+    assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:scope\]/, fn ->
+      Provider.new(:test, issuer: @issuer, scope: ["repo"])
+    end
+  end
+
   test "keeps the params a browser sign-in sets itself" do
-    assert_raise ArgumentError, ~r/can't set/, fn ->
+    assert_raise NimbleOptions.ValidationError, ~r/can't set state/, fn ->
       Provider.new(:test,
         issuer: @issuer,
         client_id: "client",
