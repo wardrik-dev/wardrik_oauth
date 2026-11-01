@@ -8,7 +8,7 @@ OAuth sign-in for [WardrikCore](https://hexdocs.pm/wardrik_core) agents. Each gr
 ```elixir
 def deps do
   [
-    {:wardrik_oauth, "~> 0.1.0-rc.1"}
+    {:wardrik_oauth, "~> 0.1.0-rc.2"}
   ]
 end
 ```
