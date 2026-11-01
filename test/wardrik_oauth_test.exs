@@ -92,11 +92,15 @@ defmodule WardrikOAuthTest do
     %{vault: vault, oauth: oauth, store: WardrikStore.scope(store, "wardrik_oauth")}
   end
 
-  defp get(oauth, path) do
+  defp get(oauth, path, as \\ @jon) do
     :get
     |> Plug.Test.conn(path)
-    |> WardrikOAuth.Plug.call(WardrikOAuth.Plug.init(oauth: oauth))
+    |> WardrikOAuth.Plug.call(
+      WardrikOAuth.Plug.init(oauth: oauth, principal: {__MODULE__, :at, [as]})
+    )
   end
+
+  def at(_conn, principal), do: principal
 
   defp state({:authorize, url}), do: URI.decode_query(URI.parse(url).query)["state"]
 
@@ -114,11 +118,11 @@ defmodule WardrikOAuthTest do
   defp sign_in(oauth, name, principal) do
     {:ok, url} = WardrikOAuth.authorize(oauth, name, principal)
 
-    WardrikOAuth.finish(oauth, %{
-      "state" => state({:authorize, url}),
-      "code" => "c",
-      "iss" => GitHub.issuer()
-    })
+    WardrikOAuth.finish(
+      oauth,
+      %{"state" => state({:authorize, url}), "code" => "c", "iss" => GitHub.issuer()},
+      as: principal
+    )
   end
 
   defp token(fields),
@@ -139,16 +143,18 @@ defmodule WardrikOAuthTest do
              WardrikOAuth.authorize(oauth, "github_sealed", @jon)
 
     {:ok, _vsn} =
-      WardrikVault.put(vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", "sealed-secret")
+      WardrikVault.put(vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", "sealed-secret",
+        kind: :client_secret
+      )
 
     {:ok, url} = WardrikOAuth.authorize(oauth, "github_sealed", @jon)
 
-    {:ok, "github_sealed"} =
-      WardrikOAuth.finish(oauth, %{
-        "state" => state({:authorize, url}),
-        "code" => "c",
-        "iss" => GitHub.issuer()
-      })
+    {:ok, %{provider: "github_sealed"}} =
+      WardrikOAuth.finish(
+        oauth,
+        %{"state" => state({:authorize, url}), "code" => "c", "iss" => GitHub.issuer()},
+        as: @jon
+      )
 
     assert_received {:exchanged,
                      %{"client_id" => "sealed-client", "client_secret" => "sealed-secret"}}
@@ -166,12 +172,20 @@ defmodule WardrikOAuthTest do
       assert {:error, "crm's client_secret, {:secret, \"CRM_SECRET\"}, isn't sealed for acme"} =
                WardrikOAuth.authorize(oauth, "crm", @acme_jon)
 
-      {:ok, _vsn} = WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "first")
-      assert {:ok, "crm"} = sign_in(oauth, "crm", @acme_jon)
+      {:ok, _vsn} =
+        WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "first",
+          kind: :client_secret
+        )
+
+      assert {:ok, %{provider: "crm"}} = sign_in(oauth, "crm", @acme_jon)
       assert_received {:exchanged, %{"client_id" => "acme-app", "client_secret" => "first"}}
 
-      {:ok, _vsn} = WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "rotated")
-      assert {:ok, "crm"} = sign_in(oauth, "crm", @acme_jon)
+      {:ok, _vsn} =
+        WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "rotated",
+          kind: :client_secret
+        )
+
+      assert {:ok, %{provider: "crm"}} = sign_in(oauth, "crm", @acme_jon)
       assert_received {:exchanged, %{"client_secret" => "rotated"}}
     end
 
@@ -198,12 +212,12 @@ defmodule WardrikOAuthTest do
                "client_id" => "registered-client"
              }
 
-      {:ok, "tracker"} =
-        WardrikOAuth.finish(oauth, %{
-          "state" => state({:authorize, url}),
-          "code" => "c",
-          "iss" => GitHub.issuer()
-        })
+      {:ok, %{provider: "tracker"}} =
+        WardrikOAuth.finish(
+          oauth,
+          %{"state" => state({:authorize, url}), "code" => "c", "iss" => GitHub.issuer()},
+          as: @acme_jon
+        )
 
       assert_received {:exchanged, %{"client_secret" => "registered-secret"}}
     end
@@ -425,13 +439,17 @@ defmodule WardrikOAuthTest do
 
       state = URI.decode_query(query)["state"]
 
-      assert {:ok, "linear"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
+      assert {:ok, %{provider: "linear"}} =
+               WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"}, as: @jon)
+
       assert_received {:exchanged, %{"client_id" => "linear-client"}}
     end
 
     test "sends the secret in the form by default", %{vault: vault, oauth: oauth} do
       state = state(WardrikVault.resolve("linear", @jon, vault))
-      {:ok, "linear"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
+
+      {:ok, %{provider: "linear"}} =
+        WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"}, as: @jon)
 
       assert_received {:exchanged, %{"client_secret" => "linear-secret"}}
       assert_received {:client_auth, []}
@@ -439,7 +457,9 @@ defmodule WardrikOAuthTest do
 
     test "sends the secret in a Basic header when the app asks", %{vault: vault, oauth: oauth} do
       state = state(WardrikVault.resolve("notion", @jon, vault))
-      {:ok, "notion"} = WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"})
+
+      {:ok, %{provider: "notion"}} =
+        WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"}, as: @jon)
 
       assert_received {:exchanged, form}
       refute Map.has_key?(form, "client_secret")
@@ -454,13 +474,13 @@ defmodule WardrikOAuthTest do
       state = state(WardrikVault.resolve("github_web", @jon, vault))
       evil = %{"state" => state, "code" => "c", "iss" => "https://evil.test"}
 
-      assert {:error, :wrong_issuer} = WardrikOAuth.finish(oauth, evil)
+      assert {:error, :wrong_issuer} = WardrikOAuth.finish(oauth, evil, as: @jon)
       assert_receive {:done, {:error, :wrong_issuer}}
       refute_received {:exchanged, _form}
 
       state = state(WardrikVault.resolve("github_web", @jon, vault))
       honest = %{"state" => state, "code" => "c", "iss" => GitHub.issuer()}
-      assert {:ok, "github_web"} = WardrikOAuth.finish(oauth, honest)
+      assert {:ok, %{provider: "github_web"}} = WardrikOAuth.finish(oauth, honest, as: @jon)
     end
 
     test "ends when the principal declines", %{vault: vault, oauth: oauth} do
@@ -472,11 +492,52 @@ defmodule WardrikOAuthTest do
       assert_receive {:done, {:error, {:refused, "access_denied"}}}
     end
 
+    test "finishes only for the principal who started it, and stays open for them", %{
+      vault: vault,
+      oauth: oauth
+    } do
+      state = state(WardrikVault.resolve("linear", @jon, vault))
+      someone = %Principal{id: "acme/@mallory"}
+
+      assert {:error, :wrong_principal} =
+               WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"}, as: someone)
+
+      assert {:error, :wrong_principal} =
+               WardrikOAuth.finish(oauth, %{"state" => state, "error" => "access_denied"},
+                 as: someone
+               )
+
+      refute_received {:exchanged, _form}
+      assert WardrikVault.resolve("linear", someone, vault) != {:ok, "browser_token"}
+
+      assert {:ok, %{provider: "linear", principal: @jon}} =
+               WardrikOAuth.finish(oauth, %{"state" => state, "code" => "c"}, as: @jon)
+    end
+
+    test "finishes a callback only for whoever the app says is at the browser", %{
+      vault: vault,
+      oauth: oauth
+    } do
+      state = state(WardrikVault.resolve("google", @jon, vault))
+      callback = "/callback?" <> URI.encode_query(%{state: state, code: "the-code"})
+
+      assert %{status: 401, resp_body: body} = get(oauth, callback, nil)
+      assert body =~ "can't tell who you are"
+
+      assert %{status: 400, resp_body: body} =
+               get(oauth, callback, %Principal{id: "acme/@mallory"})
+
+      assert body =~ "Someone else started this sign-in"
+      refute_received {:exchanged, _form}
+
+      assert get(oauth, callback).status == 200
+    end
+
     test "needs a state, and a code", %{vault: vault, oauth: oauth} do
-      assert WardrikOAuth.finish(oauth, %{"code" => "c"}) == {:error, :no_such_flow}
+      assert WardrikOAuth.finish(oauth, %{"code" => "c"}, as: @jon) == {:error, :no_such_flow}
 
       state = state(WardrikVault.resolve("google", @jon, vault))
-      assert WardrikOAuth.finish(oauth, %{"state" => state}) == {:error, :no_code}
+      assert WardrikOAuth.finish(oauth, %{"state" => state}, as: @jon) == {:error, :no_code}
     end
   end
 
@@ -539,7 +600,10 @@ defmodule WardrikOAuthTest do
             client_secret: {:secret, "SECRET"}
           )
 
-        {:ok, _vsn} = WardrikVault.put(vault, %Principal{id: owner}, "SECRET", owner <> "-secret")
+        {:ok, _vsn} =
+          WardrikVault.put(vault, %Principal{id: owner}, "SECRET", owner <> "-secret",
+            kind: :client_secret
+          )
       end
 
       :ok
@@ -574,7 +638,7 @@ defmodule WardrikOAuthTest do
     end
 
     test "record the provider that issued a grant", %{oauth: oauth, vault: vault} do
-      assert {:ok, "crm"} = sign_in(oauth, "crm", @acme_jon)
+      assert {:ok, %{provider: "crm"}} = sign_in(oauth, "crm", @acme_jon)
 
       {:ok, json} = WardrikVault.fetch(vault, @acme_jon, "crm")
       assert {:ok, %Token{owner: "acme"}} = Token.decode(json)

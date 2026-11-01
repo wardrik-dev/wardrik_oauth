@@ -12,6 +12,11 @@
 
 ### Breaking
 
+- `finish/3` finishes a sign-in only `as:` the principal who started it, and answers
+  `{:ok, %{provider: name, principal: principal}}`. Anyone else gets `{:error, :wrong_principal}`,
+  and the sign-in stays open. `WardrikOAuth.Plug` takes a required `:principal`, which says who is
+  at the browser.
+- An app's client secret is read only if it's sealed as a `:client_secret`.
 - `add_provider/4`, `remove_provider/3` and `providers/2` take the owner, and `providers/2`
   returns `WardrikOAuth.Provider` structs.
 

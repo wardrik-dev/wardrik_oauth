@@ -33,9 +33,11 @@ defmodule WardrikOAuth.Flow do
   @spec describe(pid()) :: map()
   def describe(pid), do: GenServer.call(pid, :describe)
 
-  @doc "Finishes a browser flow with its callback's params."
-  @spec finish(pid(), map()) :: {:ok, String.t()} | {:error, term()}
-  def finish(pid, params), do: GenServer.call(pid, {:finish, params}, :timer.seconds(30))
+  @doc "Finishes a browser flow with its callback's params, for `principal`."
+  @spec finish(pid(), map(), Principal.t()) ::
+          {:ok, %{provider: String.t(), principal: Principal.t()}} | {:error, term()}
+  def finish(pid, params, principal),
+    do: GenServer.call(pid, {:finish, params, principal}, :timer.seconds(30))
 
   @doc false
   def start_link({settings, provider, principal}) do
@@ -66,17 +68,31 @@ defmodule WardrikOAuth.Flow do
 
   def handle_call(:describe, _from, flow), do: {:reply, described(flow), flow}
 
-  def handle_call({:finish, %{"error" => error}}, _from, flow) do
+  # Someone other than the principal who started it can't finish or end it.
+  def handle_call(
+        {:finish, _params, %Principal{id: id}},
+        _from,
+        %{principal: %{id: started}} = flow
+      )
+      when id != started,
+      do: {:reply, {:error, :wrong_principal}, flow}
+
+  def handle_call({:finish, %{"error" => error}, _principal}, _from, flow) do
     outcome = {:error, {:refused, error}}
     {:stop, :normal, outcome, ended(flow, outcome)}
   end
 
-  def handle_call({:finish, %{"code" => code} = params}, _from, %{kind: :browser} = flow) do
+  def handle_call(
+        {:finish, %{"code" => code} = params, _principal},
+        _from,
+        %{kind: :browser} = flow
+      ) do
     outcome = exchanged(flow, code, params["iss"])
     {:stop, :normal, finished(outcome, flow), ended(flow, outcome)}
   end
 
-  def handle_call({:finish, _params}, _from, flow), do: {:reply, {:error, :no_code}, flow}
+  def handle_call({:finish, _params, _principal}, _from, flow),
+    do: {:reply, {:error, :no_code}, flow}
 
   @impl GenServer
   def handle_info(:poll, flow) do
@@ -135,7 +151,9 @@ defmodule WardrikOAuth.Flow do
   defp issuer(metadata, iss),
     do: if(Browser.issued_by?(metadata, iss), do: :ok, else: {:error, :wrong_issuer})
 
-  defp finished(:granted, flow), do: {:ok, flow.provider.name}
+  defp finished(:granted, flow),
+    do: {:ok, %{provider: flow.provider.name, principal: flow.principal}}
+
   defp finished(outcome, _flow), do: outcome
 
   defp polled({:ok, %Token{} = token}, flow),

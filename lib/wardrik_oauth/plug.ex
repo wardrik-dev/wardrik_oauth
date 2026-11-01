@@ -2,7 +2,9 @@ defmodule WardrikOAuth.Plug do
   @moduledoc """
   Serves the sign-in pages. Mount it at `WardrikOAuth`'s `page`.
 
-      forward "/oauth", WardrikOAuth.Plug, oauth: MyApp.OAuth
+      forward "/oauth", WardrikOAuth.Plug,
+        oauth: MyApp.OAuth,
+        principal: {MyApp.Session, :principal, []}
 
   ## Paths
 
@@ -13,6 +15,11 @@ defmodule WardrikOAuth.Plug do
   ## Options
 
     * `:oauth` - required. The `WardrikOAuth` name.
+    * `:principal` - required. `{module, function, args}`, called with the conn and then `args`.
+      Returns the `WardrikCore.Principal` at the browser, as your app knows them from their
+      session, or `nil` if it can't tell. A callback finishes only for the principal who started
+      the sign-in, so someone else's link can't connect your account to their agents. See
+      `WardrikOAuth.finish/3`.
   """
 
   @behaviour Plug
@@ -22,27 +29,22 @@ defmodule WardrikOAuth.Plug do
   alias Plug.HTML
 
   @impl Plug
-  def init(opts), do: Keyword.fetch!(opts, :oauth)
+  def init(opts) do
+    {module, function, args} = Keyword.fetch!(opts, :principal)
+    %{oauth: Keyword.fetch!(opts, :oauth), principal: {module, function, args}}
+  end
 
   @impl Plug
-  def call(%Plug.Conn{method: "GET", path_info: ["callback"]} = conn, oauth) do
+  def call(%Plug.Conn{method: "GET", path_info: ["callback"]} = conn, %{oauth: oauth} = opts) do
     conn = fetch_query_params(conn)
 
-    case WardrikOAuth.finish(oauth, conn.query_params) do
-      {:ok, provider} ->
-        page(
-          conn,
-          200,
-          "Signed in",
-          "You're signed in to #{escape(provider)}. You can close this tab."
-        )
-
-      {:error, reason} ->
-        page(conn, 400, "Sign-in didn't finish", failed(reason))
+    case principal(conn, opts) do
+      nil -> page(conn, 401, "Sign-in didn't finish", unknown())
+      principal -> finished(conn, WardrikOAuth.finish(oauth, conn.query_params, as: principal))
     end
   end
 
-  def call(%Plug.Conn{method: "GET", path_info: ["device", id]} = conn, oauth) do
+  def call(%Plug.Conn{method: "GET", path_info: ["device", id]} = conn, %{oauth: oauth}) do
     case WardrikOAuth.flow(oauth, id) do
       {:ok, %{user_code: code, verification_uri: uri, provider: provider}} ->
         page(conn, 200, "Sign in to #{escape(provider)}", """
@@ -56,18 +58,43 @@ defmodule WardrikOAuth.Plug do
     end
   end
 
-  def call(%Plug.Conn{method: "GET", path_info: ["client"]} = conn, oauth) do
+  def call(%Plug.Conn{method: "GET", path_info: ["client"]} = conn, %{oauth: oauth}) do
     conn
     |> put_resp_content_type("application/json")
     |> put_resp_header("cache-control", "public, max-age=3600")
     |> send_resp(200, JSON.encode!(WardrikOAuth.client_document(oauth)))
   end
 
-  def call(conn, _oauth), do: send_resp(conn, 404, "Not found")
+  def call(conn, _opts), do: send_resp(conn, 404, "Not found")
+
+  defp principal(conn, %{principal: {module, function, args}}),
+    do: apply(module, function, [conn | args])
+
+  defp finished(conn, outcome) do
+    case outcome do
+      {:ok, %{provider: provider}} ->
+        page(
+          conn,
+          200,
+          "Signed in",
+          "You're signed in to #{escape(provider)}. You can close this tab."
+        )
+
+      {:error, reason} ->
+        page(conn, 400, "Sign-in didn't finish", failed(reason))
+    end
+  end
 
   defp failed({:refused, _error}), do: "The sign-in was declined."
   defp failed(:no_such_flow), do: ended()
+
+  defp failed(:wrong_principal),
+    do: "Someone else started this sign-in, so it can't connect your account."
+
   defp failed(_reason), do: "The sign-in couldn't be finished. Ask again to start a new one."
+
+  defp unknown,
+    do: "This page can't tell who you are. Sign in to the app that sent you here, and ask again."
 
   defp ended, do: "This sign-in has ended, or was already used. Ask again to start a new one."
 

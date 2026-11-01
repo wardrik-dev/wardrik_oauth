@@ -72,7 +72,7 @@ defmodule WardrikOAuth.MixProject do
     [
       sibling(:wardrik_core, "~> 0.1.0-rc.1"),
       sibling(:wardrik_protocol, "~> 0.1.0-rc.2"),
-      sibling(:wardrik_vault, "~> 0.1.0-rc.1"),
+      sibling(:wardrik_vault, "~> 0.1.0-rc.2"),
       {:nimble_options, "~> 1.1"},
       {:req, "~> 0.5"},
       {:plug, "~> 1.16"},
