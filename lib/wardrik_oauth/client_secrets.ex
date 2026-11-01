@@ -14,7 +14,7 @@ defmodule WardrikOAuth.ClientSecrets do
   def seal(_settings, _name, nil), do: :ok
 
   def seal(settings, name, secret) do
-    case WardrikVault.put(settings.vault, @owner, name, secret) do
+    case WardrikVault.put(settings.vault, @owner, name, secret, kind: :client_secret) do
       {:ok, _vsn} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -23,7 +23,7 @@ defmodule WardrikOAuth.ClientSecrets do
   @doc "Returns the secret under `name`, or `nil`."
   @spec unseal(map(), String.t()) :: String.t() | nil
   def unseal(settings, name) do
-    case WardrikVault.fetch(settings.vault, @owner, name) do
+    case WardrikVault.fetch(settings.vault, @owner, name, kind: :client_secret) do
       {:ok, secret} -> secret
       {:error, _none} -> nil
     end

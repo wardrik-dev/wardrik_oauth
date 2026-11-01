@@ -216,25 +216,34 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Finishes a browser sign-in from its callback's query params.
+  Finishes a browser sign-in from its callback's query params, for the principal `as` names.
 
-  The params carry `"state"`, and `"code"` or `"error"`. Returns `{:ok, provider}` or
-  `{:error, reason}`, and `{:error, :no_such_flow}` if the sign-in has ended.
+      WardrikOAuth.finish(MyApp.OAuth, params, as: current_principal)
+      #=> {:ok, %{provider: "github", principal: %WardrikCore.Principal{id: "acme/@jon"}}}
 
-  `WardrikOAuth.Plug` calls this. Call it yourself to handle the callback in your own route.
+  The params carry `"state"`, and `"code"` or `"error"`. Only the principal who started the sign-in
+  can finish it: anyone else gets `{:error, :wrong_principal}`, and the sign-in stays open for
+  them. That stops someone else's link from connecting your account to their agents. Returns
+  `{:error, :no_such_flow}` if the sign-in has ended.
+
+  `as` is whoever your app knows is at the browser, as from their session. `WardrikOAuth.Plug`
+  calls this with the principal its `:principal` option returns.
   """
-  @spec finish(atom(), map()) :: {:ok, String.t()} | {:error, term()}
-  def finish(oauth, %{"state" => state} = params) when is_binary(state) do
-    case Registry.lookup(registry(oauth), {:state, state}) do
-      [{pid, _value}] -> finished(pid, params)
-      [] -> {:error, :no_such_flow}
+  @spec finish(atom(), map(), keyword()) ::
+          {:ok, %{provider: String.t(), principal: Principal.t()}} | {:error, term()}
+  def finish(oauth, params, opts) do
+    %Principal{} = principal = Keyword.fetch!(opts, :as)
+
+    with %{"state" => state} when is_binary(state) <- params,
+         [{pid, _value}] <- Registry.lookup(registry(oauth), {:state, state}) do
+      finished(pid, params, principal)
+    else
+      _none -> {:error, :no_such_flow}
     end
   end
 
-  def finish(_oauth, _params), do: {:error, :no_such_flow}
-
-  defp finished(pid, params) do
-    Flow.finish(pid, params)
+  defp finished(pid, params, principal) do
+    Flow.finish(pid, params, principal)
   catch
     :exit, _ended -> {:error, :no_such_flow}
   end
@@ -383,7 +392,7 @@ defmodule WardrikOAuth do
   end
 
   defp client_secret(settings, %Provider{client_secret: {:secret, name}, owner: owner}),
-    do: WardrikVault.fetch(settings.vault, %Principal{id: owner}, name)
+    do: WardrikVault.fetch(settings.vault, %Principal{id: owner}, name, kind: :client_secret)
 
   defp client_secret(_settings, %Provider{client_secret: secret}), do: {:ok, secret}
 
