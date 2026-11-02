@@ -20,16 +20,10 @@ defmodule WardrikOAuth.Provider do
               type: :string,
               doc: """
               Your OAuth app's client ID. Without it, Wardrik becomes the client where the
-              service allows. See `WardrikOAuth.add_provider/2`.
+              service allows. See `WardrikOAuth.Registration`.
               """
             ],
-            client_secret: [
-              type: {:or, [:string, {:tuple, [{:in, [:secret]}, :string]}]},
-              doc: """
-              The secret. Without `:resolver`, `{:secret, name}` is read from the owner's vault
-              secrets each time it's needed, and a provider added at runtime must give it so.
-              """
-            ],
+            client_secret: [type: :string, doc: "Your OAuth app's client secret."],
             client_auth: [
               type: {:in, [:post, :basic]},
               default: :post,
@@ -54,13 +48,13 @@ defmodule WardrikOAuth.Provider do
   @moduledoc """
   An OAuth app with a service. It has the same name as the credential it grants.
 
-      github: [
+      WardrikOAuth.Provider.new("github",
         issuer: "https://github.com/login/oauth",
         client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
-        client_secret: {:secret, "GITHUB_CLIENT_SECRET"},
+        client_secret: System.fetch_env!("GITHUB_CLIENT_SECRET"),
         scopes: ~w(repo),
         flow: :device
-      ]
+      )
 
   ## Options
 
@@ -68,12 +62,10 @@ defmodule WardrikOAuth.Provider do
 
   A provider needs an `:issuer`, a `:resource`, or both endpoints.
 
-  Its `key` names the OAuth app, so two apps never share a client or a grant. A resolver gives
+  Its `key` names the OAuth app, so two apps never share a client or a grant. Your resolver gives
   each provider a key of its own (see `WardrikOAuth.Resolver`):
 
       %{WardrikOAuth.Provider.new("github", app.options) | key: app.id}
-
-  Without `:resolver`, each belongs to an `owner` (see `WardrikOAuth.Owners`).
   """
 
   @own_params ~w(response_type client_id redirect_uri scope state code_challenge code_challenge_method resource)
@@ -83,8 +75,6 @@ defmodule WardrikOAuth.Provider do
   defstruct [
     :name,
     :key,
-    :owner,
-    :source,
     :issuer,
     :resource,
     :client_id,
@@ -101,12 +91,10 @@ defmodule WardrikOAuth.Provider do
   @type t() :: %__MODULE__{
           name: String.t(),
           key: String.t() | nil,
-          owner: Wardrik.Owners.t() | nil,
-          source: :config | :runtime | nil,
           issuer: String.t() | nil,
           resource: String.t() | nil,
           client_id: String.t() | nil,
-          client_secret: WardrikVault.value(),
+          client_secret: String.t() | nil,
           authorization_endpoint: String.t() | nil,
           token_endpoint: String.t() | nil,
           scopes: [String.t()],

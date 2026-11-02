@@ -9,16 +9,12 @@ defmodule WardrikOAuth do
          vault: MyApp.Vault,
          store: store,
          page: "https://agents.example.com/oauth",
-         on_granted: {MyApp.Agents, :granted, []},
-         providers: [github: [issuer: "https://github.com/login/oauth", client_id: id, client_secret: secret]]}
+         resolver: {MyApp.OAuthApps, []},
+         on_granted: {MyApp.Agents, :granted, []}}
       ]
 
-  Mount `WardrikOAuth.Plug` at `page` to finish sign-ins. See `WardrikOAuth.Provider` for provider
-  options.
-
-  With `:resolver`, your app says which provider each principal signs in with. See
-  `WardrikOAuth.Resolver`. Without it, providers belong to owners: those in `:providers` are the
-  deployment's, and `add_provider/2` adds an org's or a person's. See `WardrikOAuth.Owners`.
+  Mount `WardrikOAuth.Plug` at `page` to finish sign-ins. `:resolver` says which provider each
+  principal signs in with. See `WardrikOAuth.Resolver` and `WardrikOAuth.Provider`.
 
   Grants never fall back. Each belongs to the principal who signed in, and is refreshed only by
   the provider that issued it. If they now sign in with another, they sign in again.
@@ -30,7 +26,6 @@ defmodule WardrikOAuth do
 
   alias WardrikCore.Principal
   alias WardrikOAuth.Flow
-  alias WardrikOAuth.Owners
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Registration
   alias WardrikOAuth.Renewal
@@ -45,7 +40,7 @@ defmodule WardrikOAuth do
             store: [
               type: :any,
               required: true,
-              doc: "The `WardrikStore` for providers added at runtime and registered clients."
+              doc: "The `WardrikStore` for the clients Wardrik registers."
             ],
             page: [
               type: :string,
@@ -55,19 +50,11 @@ defmodule WardrikOAuth do
               """
             ],
             resolver: [
-              type: {:or, [:mod_arg, nil]},
-              default: nil,
+              type: :mod_arg,
+              required: true,
               doc: """
               `{module, config}`, the `WardrikOAuth.Resolver` that gives each principal's
-              providers. Without it, they're resolved along the owner chain.
-              """
-            ],
-            providers: [
-              type: {:list, {:tuple, [{:or, [:atom, :string]}, :keyword_list]}},
-              default: [],
-              doc: """
-              The deployment's providers, by name, without `:resolver`. See
-              `WardrikOAuth.Provider`.
+              providers.
               """
             ],
             on_granted: [
@@ -109,69 +96,7 @@ defmodule WardrikOAuth do
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
     opts = NimbleOptions.validate!(opts, @schema)
-    name = Keyword.fetch!(opts, :name)
-
-    if opts[:resolver] && opts[:providers] != [],
-      do: raise(ArgumentError, "Give providers through :resolver, not :providers, when it's set")
-
-    Supervisor.start_link(__MODULE__, Map.new(opts), name: name)
-  end
-
-  @doc """
-  Adds the provider `:name` of `:owner` at runtime, on every node, without `:resolver`.
-
-      :ok =
-        WardrikOAuth.add_provider(MyApp.OAuth,
-          owner: "acme",
-          name: "linear",
-          resource: "https://mcp.linear.app/mcp",
-          client_id: "acme-linear",
-          client_secret: {:secret, "LINEAR_CLIENT_SECRET"}
-        )
-
-  `:owner` is `deployment`, an org like `acme`, or a person like `acme/@jon`. The other options are
-  those of a provider in `:providers`, but `client_secret` must be `{:secret, name}`, read from the
-  owner's vault secrets.
-
-  Without a `client_id`, Wardrik gets one the first time someone signs in:
-
-    1. If the service reads Client ID Metadata Documents and `page` is `https`, the `client_id` is
-       the URL of the document `WardrikOAuth.Plug` serves.
-    2. Otherwise, Wardrik registers itself with the service.
-
-  Returns `{:error, reason}` for invalid options, a `client_secret` given as is, the
-  deployment's provider of a name in `:providers`, or with `:resolver`.
-  """
-  @spec add_provider(atom(), keyword()) :: :ok | {:error, String.t()}
-  def add_provider(oauth, opts) do
-    {owner, opts} = Keyword.pop!(opts, :owner)
-    {name, opts} = Keyword.pop!(opts, :name)
-    added(oauth, owner, name, opts)
-  end
-
-  defp added(oauth, owner, name, opts) when is_binary(owner) and is_binary(name) do
-    settings = settings(oauth)
-    Provider.new(name, opts)
-
-    cond do
-      settings.resolver ->
-        {:error, "providers come from the resolver"}
-
-      Wardrik.Owners.parse(owner) == :error ->
-        {:error, "#{owner} isn't an owner"}
-
-      is_binary(opts[:client_secret]) ->
-        {:error, "#{name}'s client_secret must be {:secret, name}"}
-
-      Owners.configured?(settings, owner: owner, name: name) ->
-        {:error, "#{name} is a provider the app starts with"}
-
-      true ->
-        with {:ok, _vsn} <- WardrikStore.put(settings.store, Owners.store_key(owner, name), opts),
-             do: :ok
-    end
-  rescue
-    error in [ArgumentError, NimbleOptions.ValidationError] -> {:error, Exception.message(error)}
+    Supervisor.start_link(__MODULE__, Map.new(opts), name: Keyword.fetch!(opts, :name))
   end
 
   @doc """
@@ -183,37 +108,14 @@ defmodule WardrikOAuth do
   def client_document(oauth), do: oauth |> settings() |> Registration.document()
 
   @doc """
-  Removes the provider `:name` of `:owner`, added at runtime, and the client registered for it.
+  Forgets the client Wardrik registered for the provider `key`, and its secret.
 
-      :ok = WardrikOAuth.remove_provider(MyApp.OAuth, owner: "acme", name: "linear")
+  Call it once your app deletes the OAuth app `key` names, so the store keeps no client for it.
+
+      :ok = WardrikOAuth.forget_client(MyApp.OAuth, "acme/linear")
   """
-  @spec remove_provider(atom(), owner: Wardrik.Owners.t(), name: String.t()) ::
-          :ok | {:error, term()}
-  def remove_provider(oauth, args) do
-    owner = Keyword.fetch!(args, :owner)
-    name = Keyword.fetch!(args, :name)
-    settings = settings(oauth)
-
-    with :ok <- WardrikStore.delete(settings.store, Owners.store_key(owner, name)),
-         do: Registration.forget(settings, Owners.key(owner, name))
-  end
-
-  @doc """
-  Returns the providers `owner` can sign in with, nearest first along `Wardrik.Owners.chain/1`.
-
-      WardrikOAuth.providers(MyApp.OAuth, "acme/@jon")
-      #=> [%WardrikOAuth.Provider{name: "linear", owner: "acme", source: :runtime, ...}, ...]
-
-  Only the nearest provider of each name is given. A `client_secret` is as it was given, not read.
-  With `:resolver`, there are none: your app knows its own.
-  """
-  @spec providers(atom(), Wardrik.Owners.t()) :: [Provider.t()]
-  def providers(oauth, owner) do
-    case settings(oauth) do
-      %{resolver: nil} = settings -> Owners.providers(settings, owner)
-      _resolved -> []
-    end
-  end
+  @spec forget_client(atom(), String.t()) :: :ok | {:error, term()}
+  def forget_client(oauth, key), do: oauth |> settings() |> Registration.forget(key)
 
   @doc """
   Returns the URL where `principal` signs in with the provider `name`, as it resolves for them.
@@ -313,10 +215,6 @@ defmodule WardrikOAuth do
       client_name: opts.client_name,
       page: opts |> Map.fetch!(:page) |> String.trim_trailing("/"),
       resolver: opts.resolver,
-      providers:
-        Map.new(opts.providers, fn {name, provider} ->
-          {to_string(name), Owners.deployment(name, provider)}
-        end),
       on_granted: opts.on_granted,
       req_options: checked(opts.check) ++ opts.req_options,
       registry: registry(opts.name),
@@ -368,7 +266,7 @@ defmodule WardrikOAuth do
   defp refreshed(settings, name, principal, token) do
     case resolve(settings, name, principal) do
       {:ok, %Provider{key: key} = provider} ->
-        if key == issuer(settings, name, token),
+        if key == token.provider,
           do: Renewal.renew(settings, provider: provider, principal: principal, token: token),
           else: :ask
 
@@ -379,12 +277,6 @@ defmodule WardrikOAuth do
         {:error, reason}
     end
   end
-
-  # Tokens kept before the issuer was recorded came from the deployment's provider.
-  defp issuer(%{resolver: nil}, name, %Token{provider: nil}),
-    do: Owners.key(Wardrik.Resource.deployment(), name)
-
-  defp issuer(_settings, _name, %Token{provider: key}), do: key
 
   defp resolve(settings, name, principal) do
     with {:ok, provider} <-

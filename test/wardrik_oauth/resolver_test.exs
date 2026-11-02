@@ -1,16 +1,3 @@
-defmodule WardrikOAuth.Test.Apps do
-  @moduledoc "Resolves each principal's providers as the test set them, in an `Agent`."
-  @behaviour WardrikOAuth.Resolver
-
-  @impl true
-  def provider(%{name: name, principal: principal}, apps) do
-    Agent.get(apps, fn set ->
-      send(set.test, {:resolved, name, principal.id})
-      Map.get(set, {principal.id, name}, {:error, :not_found})
-    end)
-  end
-end
-
 defmodule WardrikOAuth.ResolverTest do
   use ExUnit.Case, async: false
 
@@ -90,13 +77,6 @@ defmodule WardrikOAuth.ResolverTest do
 
     assert WardrikOAuth.authorize(oauth, "github", %Principal{id: "user_bo"}) ==
              {:error, :not_found}
-
-    assert WardrikOAuth.providers(oauth, "acme") == []
-
-    added =
-      WardrikOAuth.add_provider(oauth, owner: "acme", name: "github", issuer: GitHub.issuer())
-
-    assert added == {:error, "providers come from the resolver"}
   end
 
   test "refreshes a grant only with the provider that issued it, never another app's client", %{
@@ -159,16 +139,25 @@ defmodule WardrikOAuth.ResolverTest do
     refute_received {:registered, _request}
   end
 
-  test "takes providers from the resolver alone" do
-    assert_raise ArgumentError, ~r/through :resolver/, fn ->
+  test "needs a resolver" do
+    assert_raise NimbleOptions.ValidationError, ~r/required :resolver option not found/, fn ->
       WardrikOAuth.start_link(
-        name: :both,
+        name: :unresolved,
         vault: :vault,
         store: :store,
-        page: "https://agents.test/oauth",
-        resolver: {WardrikOAuth.Test.Apps, nil},
-        providers: [github: [issuer: GitHub.issuer()]]
+        page: "https://agents.test/oauth"
       )
     end
+  end
+
+  test "forgets the client it registered for an app", %{oauth: oauth, apps: apps} do
+    give(apps, @jon, "github", app("acme-github", nil))
+    assert {:ok, _url} = WardrikOAuth.authorize(oauth, "github", @jon)
+    assert_receive {:registered, _request}
+
+    assert :ok = WardrikOAuth.forget_client(oauth, "acme-github")
+    give(apps, @ada, "github", app("acme-github", nil))
+    assert {:ok, _url} = WardrikOAuth.authorize(oauth, "github", @ada)
+    assert_receive {:registered, _request}
   end
 end

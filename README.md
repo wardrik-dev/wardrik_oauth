@@ -15,8 +15,8 @@ end
 
 ## Start it
 
-Register an OAuth app with each service and add it as a provider. Pass `WardrikOAuth` to the vault
-as its `grants`:
+Register an OAuth app with each service. Your app says which one each principal signs in with,
+through a resolver. Pass `WardrikOAuth` to the vault as its `grants`:
 
 ```elixir
 children = [
@@ -27,35 +27,57 @@ children = [
    vault: MyApp.Vault,
    store: store,
    page: "https://agents.example.com/oauth",
-   on_granted: {MyApp.SignIns, :granted, []},
-   providers: [
-     google: [
-       issuer: "https://accounts.google.com",
-       client_id: System.fetch_env!("GOOGLE_CLIENT_ID"),
-       client_secret: System.fetch_env!("GOOGLE_CLIENT_SECRET"),
-       scopes: ~w(openid email https://www.googleapis.com/auth/calendar.readonly),
-       authorization_params: %{access_type: "offline", prompt: "consent"}
-     ],
-     linear: [
-       authorization_endpoint: "https://linear.app/oauth/authorize",
-       token_endpoint: "https://api.linear.app/oauth/token",
-       client_id: System.fetch_env!("LINEAR_CLIENT_ID"),
-       client_secret: System.fetch_env!("LINEAR_CLIENT_SECRET"),
-       scopes: ~w(read)
-     ],
-     github: [
-       issuer: "https://github.com/login/oauth",
-       client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
-       client_secret: {:secret, "GITHUB_CLIENT_SECRET"},
-       scopes: ~w(repo),
-       flow: :device
-     ]
-   ]}
+   resolver: {MyApp.OAuthApps, []},
+   on_granted: {MyApp.SignIns, :granted, []}}
 ]
 ```
 
+The resolver returns the provider a principal signs in with by its name:
+
+```elixir
+defmodule MyApp.OAuthApps do
+  @behaviour WardrikOAuth.Resolver
+
+  alias WardrikOAuth.Provider
+
+  @impl true
+  def provider(%{name: "google"}, _opts) do
+    google =
+      Provider.new("google",
+        issuer: "https://accounts.google.com",
+        client_id: System.fetch_env!("GOOGLE_CLIENT_ID"),
+        scopes: ~w(openid email https://www.googleapis.com/auth/calendar.readonly),
+        authorization_params: %{access_type: "offline", prompt: "consent"}
+      )
+
+    {:ok, %{google | key: "google", client_secret: System.fetch_env!("GOOGLE_CLIENT_SECRET")}}
+  end
+
+  def provider(%{name: "linear", principal: principal}, _opts) do
+    case MyApp.Orgs.linear_app(principal.id) do
+      nil ->
+        {:error, :not_found}
+
+      app ->
+        linear =
+          Provider.new("linear",
+            authorization_endpoint: "https://linear.app/oauth/authorize",
+            token_endpoint: "https://api.linear.app/oauth/token",
+            client_id: app.client_id,
+            scopes: ~w(read)
+          )
+
+        {:ok, %{linear | key: "linear/" <> app.id, client_secret: app.client_secret}}
+    end
+  end
+
+  def provider(_request, _opts), do: {:error, :not_found}
+end
+```
+
 A provider has the same name as the credential it grants. A tool that needs `google` signs in
-through the `google` provider.
+through the `google` provider. Its `key` names the OAuth app, and is unique to it. Two apps never
+share a registered client or a grant.
 
 Endpoints are discovered from the `issuer`'s metadata. For a service without metadata, like
 Linear, give `authorization_endpoint` and `token_endpoint`.
@@ -67,14 +89,13 @@ The client secret is sent in the form by default. Some services, like Notion, wa
 instead. Set `client_auth: :basic`:
 
 ```elixir
-notion: [
+Provider.new("notion",
   authorization_endpoint: "https://api.notion.com/v1/oauth/authorize",
   token_endpoint: "https://api.notion.com/v1/oauth/token",
   client_id: System.fetch_env!("NOTION_CLIENT_ID"),
-  client_secret: System.fetch_env!("NOTION_CLIENT_SECRET"),
   client_auth: :basic,
   authorization_params: %{owner: "user"}
-]
+)
 ```
 
 ### Provider options
@@ -91,19 +112,6 @@ notion: [
 | `authorization_params` | extra parameters for a browser sign-in | none |
 
 A provider needs an `issuer`, a `resource`, or both endpoints.
-
-### Secrets in the vault
-
-A `client_secret` of `{:secret, name}` is read from the provider's owner's vault secrets each
-time it's needed. Providers in `:providers` are the deployment's. Changing it takes no restart:
-
-```elixir
-WardrikVault.put(MyApp.Vault, %WardrikVault.Secret{
-  principal: WardrikVault.deployment(),
-  name: "GITHUB_CLIENT_SECRET",
-  value: secret
-})
-```
 
 ## Give it to agents
 
@@ -167,40 +175,24 @@ end
 [Wardrik](https://hexdocs.pm/wardrik) does all of this for you. See
 [Credentials and sign-ins](https://hexdocs.pm/wardrik/credentials.html).
 
-## Add providers at runtime
+## Grants
 
-Providers added at runtime belong to an owner: `deployment`, an org like `acme`, or a person like
-`acme/@maria`. They're kept in the store, so every node sees them:
+Each grant belongs to the principal who signed in, and records the key of the provider that
+issued it. An expired grant is refreshed only by that provider. If the resolver now gives the
+principal another app, they sign in again.
 
-```elixir
-:ok =
-  WardrikOAuth.add_provider(MyApp.OAuth,
-    owner: "acme",
-    name: "linear",
-    resource: "https://mcp.linear.app/mcp",
-    client_id: "acme-linear",
-    client_secret: {:secret, "LINEAR_CLIENT_SECRET"}
-  )
-
-WardrikOAuth.authorize(MyApp.OAuth, "linear", %WardrikCore.Principal{id: "acme/@maria"})
-#=> {:ok, "https://mcp.linear.app/authorize?client_id=acme-linear&state=..."}
-
-WardrikOAuth.providers(MyApp.OAuth, "acme/@maria")
-#=> [%WardrikOAuth.Provider{name: "linear", owner: "acme", source: :runtime, ...}, ...]
-
-:ok = WardrikOAuth.remove_provider(MyApp.OAuth, owner: "acme", name: "linear")
-```
-
-A principal signs in with the nearest provider of a name along `Wardrik.Owners.chain/1`, so
-`acme`'s `linear` comes ahead of the deployment's for Maria, and isn't offered outside `acme`. A
-runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault secrets.
-
-Grants don't fall back. Each belongs to the principal who signed in, and is renewed with the
-provider that issued it. If that provider is removed, the principal signs in again.
+The resolver runs as each sign-in starts and as each expired grant is refreshed, so a changed
+client secret takes no restart.
 
 A provider without a `client_id` gets one the first time someone signs in. See
-[Without a client ID](#without-a-client-id). The client is kept in the store, so this happens
-once. `client_name` is the name the service shows. `"Wardrik"` unless set.
+[Without a client ID](#without-a-client-id). The client is kept in the store under the provider's
+`key`, so this happens once. Once you delete an app, forget its client:
+
+```elixir
+:ok = WardrikOAuth.forget_client(MyApp.OAuth, "linear/" <> app.id)
+```
+
+`client_name` is the name the service shows. `"Wardrik"` unless set.
 
 ## Mount the pages
 
@@ -208,14 +200,16 @@ Sign-ins come back to your app. Mount `WardrikOAuth.Plug` at `page`. In a Phoeni
 
 ```elixir
 scope "/" do
-  forward "/oauth", WardrikOAuth.Plug, oauth: MyApp.OAuth
+  forward "/oauth", WardrikOAuth.Plug, oauth: MyApp.OAuth, principal: {MyApp.Session, :principal, []}
 end
 ```
 
 In a `Plug.Router`:
 
 ```elixir
-forward "/oauth", to: WardrikOAuth.Plug, init_opts: [oauth: MyApp.OAuth]
+forward "/oauth",
+  to: WardrikOAuth.Plug,
+  init_opts: [oauth: MyApp.OAuth, principal: {MyApp.Session, :principal, []}]
 ```
 
 It serves three paths under `page`:
@@ -226,8 +220,12 @@ It serves three paths under `page`:
 | `/device/:id` | Shows a device sign-in's code and where to enter it. |
 | `/client` | Serves the Client ID Metadata Document for Wardrik's own `client_id`. |
 
-To handle the callback in your own route, call `WardrikOAuth.finish/2` with its query params. It
-returns `{:ok, provider}` or `{:error, reason}`.
+`principal` returns who your app knows is at the browser. A sign-in finishes only for the
+principal who started it.
+
+To handle the callback in your own route, call `WardrikOAuth.finish/3` with its query params and
+`as:` the principal. It returns `{:ok, %{provider: name, principal: principal}}` or
+`{:error, reason}`.
 
 ### Without a client ID
 

@@ -2,21 +2,20 @@
 
 ## 0.1.0-rc.2 (2026-10-31)
 
-- `:resolver`, `WardrikOAuth.Resolver`: your app says which provider each principal signs in
-  with by name. Each provider has a `key` naming its OAuth app, which keeps its registered client
-  apart from every other app's.
 - Each grant records the key of the provider that issued it, and an expired one is refreshed only
-  by that provider. A principal who now resolves to another signs in again with it. Grants kept
-  by rc.1 came from the deployment's provider, and are refreshed only by it.
-- Without `:resolver`, providers belong to an owner: the deployment, an org or a person. A
-  principal signs in with the nearest of a name along `Wardrik.Owners.chain/1`. See
-  `WardrikOAuth.Owners`.
-- A runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault each
-  time it's needed.
+  by that provider. A principal who now resolves to another signs in again with it.
+- `forget_client/2` forgets the client Wardrik registered for a provider's key.
 - Provider and start options are validated with NimbleOptions, documented from the schema.
 
 ### Breaking
 
+- `:resolver` is required: your app says which provider each principal signs in with, by name.
+  See `WardrikOAuth.Resolver`. Each provider has a `key` naming its OAuth app, which keeps its
+  registered client apart from every other app's.
+- `:providers`, `add_provider/2`, `remove_provider/2`, `providers/2` and `WardrikOAuth.Owners`
+  are gone, and so are a provider's `owner` and `source`. A provider's `client_secret` is the
+  secret itself: your resolver reads it.
+- A grant kept by rc.1 records no provider, so its principal signs in again once.
 - `c:WardrikOAuth.Resolver.provider/2` takes a `WardrikOAuth.Resolver.Request`, then its
   options, and `WardrikOAuth` implements `WardrikVault.Grants` rc.2's request callbacks.
 - `finish/3` finishes a sign-in only `as:` the principal who started it, and answers
@@ -24,12 +23,10 @@
   and the sign-in stays open. `WardrikOAuth.Plug` takes a required `:principal`, which says who is
   at the browser.
 - An app's client secret is read only if it's sealed as a `:client_secret`.
-- `add_provider/2` and `remove_provider/2` take the provider's `:owner` and `:name`, and
-  `providers/2` takes the owner and returns `WardrikOAuth.Provider` structs.
 - `Browser.exchange/3` takes `:code` and `:verifier` with its options, `Device.poll/3` the
   `:device` and `:req_options`, `Renewal.renew/2` the `:provider`, `:principal` and `:token`,
-  `Request.post_as/3` the provider `as:` in its options, `ClientSecrets.seal/2` the `:name` and
-  `:secret`, and `Owners.configured?/2` the `:owner` and `:name`.
+  `Request.post_as/3` the provider `as:` in its options, and `ClientSecrets.seal/2` the `:name`
+  and `:secret`.
 
 ## 0.1.0-rc.1 (2026-10-30)
 

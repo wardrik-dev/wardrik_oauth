@@ -26,8 +26,6 @@ defmodule WardrikOAuth.Resolver do
 
   The provider's `name` is the one asked for, its `key` names the OAuth app, unique to it, and
   its `client_secret` is the secret itself, or `nil`. An error stops the sign-in with it.
-
-  Without `:resolver`, providers are resolved along the owner chain. See `WardrikOAuth.Owners`.
   """
 
   alias WardrikOAuth.Provider
@@ -39,9 +37,6 @@ defmodule WardrikOAuth.Resolver do
 
   @doc "Returns the provider the request's principal signs in with by its name, or why there's none."
   @spec resolve(map(), Request.t()) :: {:ok, Provider.t()} | {:error, term()}
-  def resolve(%{resolver: nil} = settings, %Request{name: name} = request),
-    do: settings |> WardrikOAuth.Owners.resolve(request) |> read(name)
-
   def resolve(%{resolver: {module, opts}}, %Request{name: name} = request),
     do: request |> module.provider(opts) |> read(name)
 
