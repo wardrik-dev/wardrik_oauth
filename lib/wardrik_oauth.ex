@@ -36,6 +36,7 @@ defmodule WardrikOAuth do
   alias WardrikOAuth.Renewal
   alias WardrikOAuth.Resolver
   alias WardrikOAuth.Token
+  alias WardrikVault.Grants
 
   @schema NimbleOptions.new!(
             name: [type: :atom, required: true, doc: "The name functions reach it by."],
@@ -263,10 +264,11 @@ defmodule WardrikOAuth do
   end
 
   @impl WardrikVault.Grants
-  def ask(_vault, name, principal, oauth), do: begin(settings(oauth), name, principal)
+  def ask(%Grants.Request{name: name, principal: principal}, oauth),
+    do: begin(settings(oauth), name, principal)
 
   @impl WardrikVault.Grants
-  def renew(_vault, name, principal, %{value: value}, oauth) do
+  def renew(%Grants.Request{name: name, principal: principal, grant: %{value: value}}, oauth) do
     settings = settings(oauth)
 
     case renewed(settings, name, principal, value) do
@@ -276,7 +278,7 @@ defmodule WardrikOAuth do
   end
 
   @impl WardrikVault.Grants
-  def refused(_vault, name, principal, oauth),
+  def refused(%Grants.Request{name: name, principal: principal}, oauth),
     do: Renewal.expire(settings(oauth), name, principal)
 
   @doc false
@@ -374,7 +376,8 @@ defmodule WardrikOAuth do
   defp issuer(_settings, _name, %Token{provider: key}), do: key
 
   defp resolve(settings, name, principal) do
-    with {:ok, provider} <- Resolver.resolve(settings, name, principal),
+    with {:ok, provider} <-
+           Resolver.resolve(settings, %Resolver.Request{name: name, principal: principal}),
          do: {:ok, Registration.registered(settings, provider)}
   end
 

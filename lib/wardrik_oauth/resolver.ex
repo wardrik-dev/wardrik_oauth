@@ -8,7 +8,7 @@ defmodule WardrikOAuth.Resolver do
         @behaviour WardrikOAuth.Resolver
 
         @impl true
-        def provider(name, %WardrikCore.Principal{id: id}, _config) do
+        def provider(%{name: name, principal: %WardrikCore.Principal{id: id}}, _opts) do
           case MyApp.OAuthApps.for_user(id, name) do
             nil ->
               {:error, :not_found}
@@ -30,20 +30,20 @@ defmodule WardrikOAuth.Resolver do
   Without `:resolver`, providers are resolved along the owner chain. See `WardrikOAuth.Owners`.
   """
 
-  alias WardrikCore.Principal
   alias WardrikOAuth.Provider
+  alias WardrikOAuth.Resolver.Request
 
-  @doc "Returns the provider `principal` signs in with as `name`."
-  @callback provider(name :: String.t(), principal :: Principal.t(), config :: term()) ::
+  @doc "Returns the provider the request's principal signs in with by its name."
+  @callback provider(Request.t(), opts :: term()) ::
               {:ok, Provider.t()} | {:error, :not_found} | {:error, term()}
 
-  @doc "Returns the provider `principal` signs in with as `name`, or why there's none."
-  @spec resolve(map(), String.t(), Principal.t()) :: {:ok, Provider.t()} | {:error, term()}
-  def resolve(%{resolver: nil} = settings, name, principal),
-    do: settings |> WardrikOAuth.Owners.resolve(name, principal) |> read(name)
+  @doc "Returns the provider the request's principal signs in with by its name, or why there's none."
+  @spec resolve(map(), Request.t()) :: {:ok, Provider.t()} | {:error, term()}
+  def resolve(%{resolver: nil} = settings, %Request{name: name} = request),
+    do: settings |> WardrikOAuth.Owners.resolve(request) |> read(name)
 
-  def resolve(%{resolver: {module, config}}, name, principal),
-    do: name |> module.provider(principal, config) |> read(name)
+  def resolve(%{resolver: {module, opts}}, %Request{name: name} = request),
+    do: request |> module.provider(opts) |> read(name)
 
   defp read({:ok, %Provider{name: name, key: key, client_secret: secret} = provider}, name)
        when is_binary(key) and key != "" and (is_binary(secret) or is_nil(secret)),

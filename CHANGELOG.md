@@ -17,6 +17,8 @@
 
 ### Breaking
 
+- `c:WardrikOAuth.Resolver.provider/2` takes a `WardrikOAuth.Resolver.Request`, then its
+  options, and `WardrikOAuth` implements `WardrikVault.Grants` rc.2's request callbacks.
 - `finish/3` finishes a sign-in only `as:` the principal who started it, and answers
   `{:ok, %{provider: name, principal: principal}}`. Anyone else gets `{:error, :wrong_principal}`,
   and the sign-in stays open. `WardrikOAuth.Plug` takes a required `:principal`, which says who is

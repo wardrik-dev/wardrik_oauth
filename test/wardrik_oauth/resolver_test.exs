@@ -3,7 +3,7 @@ defmodule WardrikOAuth.Test.Apps do
   @behaviour WardrikOAuth.Resolver
 
   @impl true
-  def provider(name, principal, apps) do
+  def provider(%{name: name, principal: principal}, apps) do
     Agent.get(apps, fn set ->
       send(set.test, {:resolved, name, principal.id})
       Map.get(set, {principal.id, name}, {:error, :not_found})
@@ -13,6 +13,9 @@ end
 
 defmodule WardrikOAuth.ResolverTest do
   use ExUnit.Case, async: false
+
+  defp credential(name, principal),
+    do: %WardrikCore.Credentials.Request{name: name, principal: principal}
 
   alias WardrikCore.Principal
   alias WardrikOAuth.GitHub
@@ -103,14 +106,14 @@ defmodule WardrikOAuth.ResolverTest do
     sign_in(oauth, @jon)
 
     give(apps, @jon, "github", app("globex-github", "globex-client", "globex-secret"))
-    :ok = WardrikVault.refused("github", @jon, vault)
+    :ok = WardrikVault.refused(credential("github", @jon), vault)
 
-    assert {:authorize, url} = WardrikVault.resolve("github", @jon, vault)
+    assert {:authorize, url} = WardrikVault.resolve(credential("github", @jon), vault)
     assert client_id({:authorize, url}) == "globex-client"
     refute_received {:refreshed, _token}
 
     give(apps, @jon, "github", app("acme-github", "acme-client", "acme-secret-2"))
-    assert WardrikVault.resolve("github", @jon, vault) == {:ok, "fresh"}
+    assert WardrikVault.resolve(credential("github", @jon), vault) == {:ok, "fresh"}
     assert_received {:refreshed_as, "acme-client", "acme-secret-2"}
   end
 

@@ -16,9 +16,10 @@ defmodule WardrikOAuth.Owners do
   alias WardrikCore.Principal
   alias WardrikOAuth.Provider
 
-  @doc "Returns the nearest provider `name` along the chain of `principal`."
-  @spec resolve(map(), String.t(), Principal.t()) :: {:ok, Provider.t()} | {:error, term()}
-  def resolve(settings, name, %Principal{id: id}) do
+  @doc "Returns the nearest provider of the request's name along its principal's chain."
+  @spec resolve(map(), WardrikOAuth.Resolver.Request.t()) ::
+          {:ok, Provider.t()} | {:error, term()}
+  def resolve(settings, %WardrikOAuth.Resolver.Request{name: name, principal: %Principal{id: id}}) do
     id
     |> Owners.chain()
     |> Enum.find_value({:error, :not_found}, fn owner ->
