@@ -5,7 +5,7 @@ defmodule WardrikOAuth.Owners do
 
   Each provider belongs to an `owner`: `deployment`, an org like `acme`, or a person like
   `acme/@jon`. Those in `:providers` are the deployment's, with `source: :config`. Those added
-  with `WardrikOAuth.add_provider/4` have `source: :runtime`.
+  with `WardrikOAuth.add_provider/2` have `source: :runtime`.
 
   A principal signs in with the nearest provider of a name along `Wardrik.Owners.chain/1`. Its
   `{:secret, name}` client secret is read from its owner's vault secrets.
@@ -39,9 +39,12 @@ defmodule WardrikOAuth.Owners do
     |> Enum.uniq_by(& &1.name)
   end
 
-  @doc "Returns whether the deployment's providers include `name`."
-  @spec configured?(map(), Owners.t(), String.t()) :: boolean()
-  def configured?(settings, owner, name), do: Map.has_key?(configured(settings, owner), name)
+  @doc "Returns whether the providers the app starts with include `:name` of `:owner`."
+  @spec configured?(map(), owner: Owners.t(), name: String.t()) :: boolean()
+  def configured?(settings, args) do
+    owner = Keyword.fetch!(args, :owner)
+    Map.has_key?(configured(settings, owner), Keyword.fetch!(args, :name))
+  end
 
   @doc "Returns the deployment's provider `name`, given its options."
   @spec deployment(atom() | String.t(), keyword()) :: Provider.t()

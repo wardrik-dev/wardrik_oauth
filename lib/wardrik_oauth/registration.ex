@@ -87,7 +87,7 @@ defmodule WardrikOAuth.Registration do
   end
 
   defp sealed(settings, provider, id, secret) do
-    with :ok <- ClientSecrets.seal(settings, key(provider), secret),
+    with :ok <- ClientSecrets.seal(settings, name: key(provider), secret: secret),
          do: {:ok, applied(provider, id, secret)}
   end
 

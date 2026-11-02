@@ -145,20 +145,26 @@ defmodule WardrikOAuth.PartsTest do
       }
 
       serve(fn _path, conn -> conn |> Plug.Conn.put_status(503) |> Req.Test.json(%{}) end)
-      assert {:retry, {:http, 503}} = Device.poll(metadata(), provider(), device, @req)
+
+      assert {:retry, {:http, 503}} =
+               Device.poll(metadata(), provider(), device: device, req_options: @req)
 
       serve(fn _path, conn -> Req.Test.transport_error(conn, :econnrefused) end)
-      assert {:retry, %Req.TransportError{}} = Device.poll(metadata(), provider(), device, @req)
+
+      assert {:retry, %Req.TransportError{}} =
+               Device.poll(metadata(), provider(), device: device, req_options: @req)
 
       serve(fn _path, conn -> Req.Test.json(conn, %{"error" => "expired_token"}) end)
-      assert {:error, :expired} = Device.poll(metadata(), provider(), device, @req)
+
+      assert {:error, :expired} =
+               Device.poll(metadata(), provider(), device: device, req_options: @req)
 
       serve(fn _path, conn ->
         conn |> Plug.Conn.put_status(400) |> Req.Test.json(%{"error" => "invalid_grant"})
       end)
 
       assert {:error, {:token_refused, "invalid_grant", nil}} =
-               Device.poll(metadata(), provider(), device, @req)
+               Device.poll(metadata(), provider(), device: device, req_options: @req)
     end
   end
 end

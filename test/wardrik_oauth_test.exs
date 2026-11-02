@@ -175,7 +175,9 @@ defmodule WardrikOAuthTest do
   describe "providers added as the app runs" do
     test "read their owner's client secret each time it's used", %{oauth: oauth, vault: vault} do
       assert :ok =
-               WardrikOAuth.add_provider(oauth, "acme", "crm",
+               WardrikOAuth.add_provider(oauth,
+                 owner: "acme",
+                 name: "crm",
                  issuer: GitHub.issuer(),
                  client_id: "acme-app",
                  client_secret: {:secret, "CRM_SECRET"}
@@ -207,7 +209,9 @@ defmodule WardrikOAuthTest do
 
     test "take a client secret only by reference", %{oauth: oauth} do
       assert {:error, "crm's client_secret must be {:secret, name}"} =
-               WardrikOAuth.add_provider(oauth, "acme", "crm",
+               WardrikOAuth.add_provider(oauth,
+                 owner: "acme",
+                 name: "crm",
                  issuer: GitHub.issuer(),
                  client_id: "acme-app",
                  client_secret: "acme-app-secret"
@@ -218,7 +222,9 @@ defmodule WardrikOAuthTest do
 
     test "keep a registered client's secret sealed in the vault", %{oauth: oauth, store: store} do
       :ok =
-        WardrikOAuth.add_provider(oauth, "acme/@jon", "tracker",
+        WardrikOAuth.add_provider(oauth,
+          owner: "acme/@jon",
+          name: "tracker",
           resource: "https://api.github.test/mcp/"
         )
 
@@ -240,7 +246,9 @@ defmodule WardrikOAuthTest do
 
     test "registers Wardrik with a service once, and signs in through it", %{oauth: oauth} do
       assert :ok =
-               WardrikOAuth.add_provider(oauth, @deployment, "tracker",
+               WardrikOAuth.add_provider(oauth,
+                 owner: @deployment,
+                 name: "tracker",
                  resource: "https://api.github.test/mcp/"
                )
 
@@ -264,7 +272,9 @@ defmodule WardrikOAuthTest do
       oauth: oauth
     } do
       :ok =
-        WardrikOAuth.add_provider(oauth, @deployment, "documents",
+        WardrikOAuth.add_provider(oauth,
+          owner: @deployment,
+          name: "documents",
           issuer: "https://documents.test"
         )
 
@@ -313,7 +323,9 @@ defmodule WardrikOAuthTest do
       )
 
       :ok =
-        WardrikOAuth.add_provider(:local_oauth, @deployment, "documents",
+        WardrikOAuth.add_provider(:local_oauth,
+          owner: @deployment,
+          name: "documents",
           issuer: "https://documents.test"
         )
 
@@ -326,18 +338,26 @@ defmodule WardrikOAuthTest do
 
     test "says why a provider doesn't read, or can't be signed in with", %{oauth: oauth} do
       assert {:error, "github is a provider the app starts with"} =
-               WardrikOAuth.add_provider(oauth, @deployment, "github",
+               WardrikOAuth.add_provider(oauth,
+                 owner: @deployment,
+                 name: "github",
                  resource: "https://api.github.test/mcp/"
                )
 
       assert {:error, "acme:crm isn't an owner"} =
-               WardrikOAuth.add_provider(oauth, "acme:crm", "github", issuer: GitHub.issuer())
+               WardrikOAuth.add_provider(oauth,
+                 owner: "acme:crm",
+                 name: "github",
+                 issuer: GitHub.issuer()
+               )
 
       assert {:error, "The nowhere provider needs" <> _} =
-               WardrikOAuth.add_provider(oauth, "acme", "nowhere", [])
+               WardrikOAuth.add_provider(oauth, owner: "acme", name: "nowhere")
 
       assert :ok =
-               WardrikOAuth.add_provider(oauth, @deployment, "accounts",
+               WardrikOAuth.add_provider(oauth,
+                 owner: @deployment,
+                 name: "accounts",
                  issuer: "https://accounts.test"
                )
 
@@ -346,11 +366,13 @@ defmodule WardrikOAuthTest do
 
     test "forgets a provider it's told to", %{oauth: oauth} do
       :ok =
-        WardrikOAuth.add_provider(oauth, "acme", "tracker",
+        WardrikOAuth.add_provider(oauth,
+          owner: "acme",
+          name: "tracker",
           resource: "https://api.github.test/mcp/"
         )
 
-      assert :ok = WardrikOAuth.remove_provider(oauth, "acme", "tracker")
+      assert :ok = WardrikOAuth.remove_provider(oauth, owner: "acme", name: "tracker")
       refute "tracker" in names(WardrikOAuth.providers(oauth, "acme"))
       assert {:error, :not_found} = WardrikOAuth.authorize(oauth, "tracker", @acme_jon)
     end
@@ -614,7 +636,9 @@ defmodule WardrikOAuthTest do
             {"globex", "crm", "globex-crm"}
           ] do
         :ok =
-          WardrikOAuth.add_provider(oauth, owner, name,
+          WardrikOAuth.add_provider(oauth,
+            owner: owner,
+            name: name,
             issuer: GitHub.issuer(),
             client_id: id,
             client_secret: {:secret, "SECRET"}
@@ -682,7 +706,9 @@ defmodule WardrikOAuthTest do
                WardrikVault.resolve(credential("crm", @acme_jon), vault)
 
       :ok =
-        WardrikOAuth.add_provider(oauth, "acme/@jon", "crm",
+        WardrikOAuth.add_provider(oauth,
+          owner: "acme/@jon",
+          name: "crm",
           issuer: GitHub.issuer(),
           client_id: "jon-crm"
         )

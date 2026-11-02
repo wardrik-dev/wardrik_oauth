@@ -10,11 +10,22 @@ defmodule WardrikOAuth.ClientSecrets do
 
   @owner %Principal{id: "wardrik_oauth"}
 
-  @doc "Seals `secret` under `name`. Does nothing if `secret` is `nil`."
-  @spec seal(map(), String.t(), String.t() | nil) :: :ok | {:error, term()}
-  def seal(_settings, _name, nil), do: :ok
+  @doc """
+  Seals the `:secret` under `:name`. Does nothing if `:secret` is `nil`.
 
-  def seal(settings, name, secret) do
+      :ok = ClientSecrets.seal(settings, name: "acme/linear", secret: secret)
+  """
+  @spec seal(map(), name: String.t(), secret: String.t() | nil) :: :ok | {:error, term()}
+  def seal(settings, args) do
+    name = Keyword.fetch!(args, :name)
+
+    case Keyword.fetch!(args, :secret) do
+      nil -> :ok
+      secret -> sealed(settings, name, secret)
+    end
+  end
+
+  defp sealed(settings, name, secret) do
     sealed = %Secret{principal: @owner, name: name, value: secret}
 
     case WardrikVault.put(settings.vault, sealed, kind: :client_secret) do

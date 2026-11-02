@@ -20,7 +20,7 @@ defmodule WardrikOAuth.Provider do
               type: :string,
               doc: """
               Your OAuth app's client ID. Without it, Wardrik becomes the client where the
-              service allows. See `WardrikOAuth.add_provider/4`.
+              service allows. See `WardrikOAuth.add_provider/2`.
               """
             ],
             client_secret: [

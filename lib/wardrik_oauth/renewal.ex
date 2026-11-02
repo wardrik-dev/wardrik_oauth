@@ -12,13 +12,20 @@ defmodule WardrikOAuth.Renewal do
   alias WardrikVault.Secret
 
   @doc """
-  Returns the grant's access token, refreshing it first with `provider` if it has expired.
+  Returns the access token of the `:principal`'s grant `:token`, refreshing it first with
+  `:provider` if it has expired.
+
+      Renewal.renew(settings, provider: provider, principal: principal, token: token)
 
   Returns `:ask` if the principal must sign in again.
   """
-  @spec renew(map(), Provider.t(), Principal.t(), Token.t()) ::
+  @spec renew(map(), provider: Provider.t(), principal: Principal.t(), token: Token.t()) ::
           {:ok, String.t()} | :ask | {:error, term()}
-  def renew(settings, provider, principal, %Token{} = token) do
+  def renew(settings, args) do
+    provider = Keyword.fetch!(args, :provider)
+    principal = Keyword.fetch!(args, :principal)
+    %Token{} = token = Keyword.fetch!(args, :token)
+
     if Token.fresh?(token),
       do: {:ok, token.access_token},
       else: refresh(settings, provider, principal)
@@ -80,7 +87,7 @@ defmodule WardrikOAuth.Renewal do
       |> Request.present("resource", provider.resource)
 
     with {:ok, status, body} <-
-           Request.post_as(token.token_endpoint, provider, form, settings.req_options),
+           Request.post_as(token.token_endpoint, form, [as: provider] ++ settings.req_options),
          do: Token.from_response(status, body, token.token_endpoint)
   end
 

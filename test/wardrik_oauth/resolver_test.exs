@@ -93,8 +93,10 @@ defmodule WardrikOAuth.ResolverTest do
 
     assert WardrikOAuth.providers(oauth, "acme") == []
 
-    assert WardrikOAuth.add_provider(oauth, "acme", "github", issuer: GitHub.issuer()) ==
-             {:error, "providers come from the resolver"}
+    added =
+      WardrikOAuth.add_provider(oauth, owner: "acme", name: "github", issuer: GitHub.issuer())
+
+    assert added == {:error, "providers come from the resolver"}
   end
 
   test "refreshes a grant only with the provider that issued it, never another app's client", %{

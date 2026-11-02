@@ -25,13 +25,15 @@ defmodule WardrikOAuth.Request do
   end
 
   @doc """
-  Posts `form` to `url` as `provider`'s client. Returns the status and the JSON body.
+  Posts `form` to `url` as the client of the provider `:as`. Returns the status and the JSON body.
+
+      Request.post_as(url, form, [as: provider] ++ req_options)
 
   The client secret goes in the form, or in an HTTP Basic header if `client_auth` is `:basic`.
   """
-  @spec post_as(String.t(), Provider.t(), map(), keyword()) ::
-          {:ok, pos_integer(), map()} | {:error, term()}
-  def post_as(url, %Provider{} = provider, form, req_options) do
+  @spec post_as(String.t(), map(), keyword()) :: {:ok, pos_integer(), map()} | {:error, term()}
+  def post_as(url, form, req_options) do
+    {%Provider{} = provider, req_options} = Keyword.pop!(req_options, :as)
     {form, headers} = authenticated(provider, Map.put(form, "client_id", provider.client_id))
     {check, req_options} = Keyword.pop(req_options, :check)
 

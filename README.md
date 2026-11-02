@@ -174,7 +174,9 @@ Providers added at runtime belong to an owner: `deployment`, an org like `acme`,
 
 ```elixir
 :ok =
-  WardrikOAuth.add_provider(MyApp.OAuth, "acme", "linear",
+  WardrikOAuth.add_provider(MyApp.OAuth,
+    owner: "acme",
+    name: "linear",
     resource: "https://mcp.linear.app/mcp",
     client_id: "acme-linear",
     client_secret: {:secret, "LINEAR_CLIENT_SECRET"}
@@ -186,7 +188,7 @@ WardrikOAuth.authorize(MyApp.OAuth, "linear", %WardrikCore.Principal{id: "acme/@
 WardrikOAuth.providers(MyApp.OAuth, "acme/@maria")
 #=> [%WardrikOAuth.Provider{name: "linear", owner: "acme", source: :runtime, ...}, ...]
 
-:ok = WardrikOAuth.remove_provider(MyApp.OAuth, "acme", "linear")
+:ok = WardrikOAuth.remove_provider(MyApp.OAuth, owner: "acme", name: "linear")
 ```
 
 A principal signs in with the nearest provider of a name along `Wardrik.Owners.chain/1`, so

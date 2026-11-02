@@ -97,7 +97,7 @@ defmodule WardrikOAuth.Flow do
   @impl GenServer
   def handle_info(:poll, flow) do
     flow.metadata
-    |> Device.poll(flow.provider, flow.device, flow.settings.req_options)
+    |> Device.poll(flow.provider, device: flow.device, req_options: flow.settings.req_options)
     |> polled(flow)
   end
 
@@ -139,11 +139,15 @@ defmodule WardrikOAuth.Flow do
     do: %{provider: flow.provider.name, principal: flow.principal, url: flow.url}
 
   defp exchanged(flow, code, iss) do
-    options = [redirect_uri: redirect_uri(flow), req_options: flow.settings.req_options]
+    exchange = [
+      code: code,
+      verifier: flow.verifier,
+      redirect_uri: redirect_uri(flow),
+      req_options: flow.settings.req_options
+    ]
 
     with :ok <- issuer(flow.metadata, iss),
-         {:ok, token} <-
-           Browser.exchange(flow.metadata, flow.provider, code, flow.verifier, options) do
+         {:ok, token} <- Browser.exchange(flow.metadata, flow.provider, exchange) do
       granted(flow, token)
     end
   end

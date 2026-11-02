@@ -37,23 +37,33 @@ defmodule WardrikOAuth.Device do
       |> Request.present("scope", Enum.join(provider.scopes, " "))
       |> Request.present("resource", provider.resource)
 
-    case Request.post_as(metadata.device_authorization_endpoint, provider, form, req_options) do
+    case Request.post_as(
+           metadata.device_authorization_endpoint,
+           form,
+           [as: provider] ++ req_options
+         ) do
       {:ok, 200, body} -> read(body)
       {:ok, status, body} -> {:error, Request.refusal(status, body)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  @doc "Polls the token endpoint once to see if the principal has entered the code."
-  @spec poll(Metadata.t(), Provider.t(), t(), keyword()) :: poll()
-  def poll(%Metadata{} = metadata, %Provider{} = provider, %__MODULE__{} = device, req_options) do
+  @doc """
+  Polls the token endpoint once to see if the principal has entered the `:device` code.
+
+      Device.poll(metadata, provider, device: device, req_options: req_options)
+  """
+  @spec poll(Metadata.t(), Provider.t(), device: t(), req_options: keyword()) :: poll()
+  def poll(%Metadata{} = metadata, %Provider{} = provider, args) do
+    %__MODULE__{} = device = Keyword.fetch!(args, :device)
+
     form =
       %{}
       |> Map.merge(%{"grant_type" => @grant, "device_code" => device.device_code})
       |> Request.present("resource", provider.resource)
 
     metadata.token_endpoint
-    |> Request.post_as(provider, form, req_options)
+    |> Request.post_as(form, [as: provider] ++ Keyword.fetch!(args, :req_options))
     |> polled(metadata.token_endpoint)
   end
 

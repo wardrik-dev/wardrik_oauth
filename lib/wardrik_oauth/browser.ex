@@ -47,27 +47,36 @@ defmodule WardrikOAuth.Browser do
   def issued_by?(%Metadata{iss_supported?: supported?}, nil), do: not supported?
   def issued_by?(%Metadata{}, _other), do: false
 
-  @doc "Exchanges the code a principal came back with for a token."
-  @spec exchange(Metadata.t(), Provider.t(), String.t(), String.t(), keyword()) ::
-          {:ok, Token.t()} | {:error, term()}
-  def exchange(%Metadata{} = metadata, %Provider{} = provider, code, verifier, opts) do
+  @doc """
+  Exchanges the `:code` a principal came back with for a token, proved by the PKCE `:verifier`.
+
+      Browser.exchange(metadata, provider,
+        code: code,
+        verifier: verifier,
+        redirect_uri: redirect_uri,
+        req_options: req_options
+      )
+  """
+  @spec exchange(Metadata.t(), Provider.t(),
+          code: String.t(),
+          verifier: String.t(),
+          redirect_uri: String.t(),
+          req_options: keyword()
+        ) :: {:ok, Token.t()} | {:error, term()}
+  def exchange(%Metadata{} = metadata, %Provider{} = provider, args) do
     form =
       %{}
       |> Map.merge(%{
         "grant_type" => "authorization_code",
-        "code" => code,
-        "redirect_uri" => Keyword.fetch!(opts, :redirect_uri),
-        "code_verifier" => verifier
+        "code" => Keyword.fetch!(args, :code),
+        "redirect_uri" => Keyword.fetch!(args, :redirect_uri),
+        "code_verifier" => Keyword.fetch!(args, :verifier)
       })
       |> Request.present("resource", provider.resource)
 
-    with {:ok, status, body} <-
-           Request.post_as(
-             metadata.token_endpoint,
-             provider,
-             form,
-             Keyword.fetch!(opts, :req_options)
-           ),
+    req_options = [as: provider] ++ Keyword.fetch!(args, :req_options)
+
+    with {:ok, status, body} <- Request.post_as(metadata.token_endpoint, form, req_options),
          do: Token.from_response(status, body, metadata.token_endpoint)
   end
 
