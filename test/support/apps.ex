@@ -6,9 +6,7 @@ defmodule WardrikOAuth.Test.Fixed do
   def provider(%{name: name}, providers) do
     case Enum.find(providers, fn {given, _opts} -> to_string(given) == name end) do
       {_given, opts} ->
-        {secret, opts} = Keyword.pop(opts, :client_secret)
-        provider = WardrikOAuth.Provider.new(name, opts)
-        {:ok, %{provider | key: "fixed/" <> name, client_secret: secret}}
+        {:ok, WardrikOAuth.Provider.new(name, [key: "fixed/" <> name] ++ opts)}
 
       nil ->
         {:error, :not_found}

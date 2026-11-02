@@ -13,7 +13,10 @@ defmodule WardrikOAuth.PartsTest do
 
   defp provider(opts \\ []),
     do:
-      Provider.new(:test, [issuer: @issuer, client_id: "client", client_secret: "secret"] ++ opts)
+      Provider.new(
+        :test,
+        [key: "test", issuer: @issuer, client_id: "client", client_secret: "secret"] ++ opts
+      )
 
   defp metadata(device_endpoint \\ "https://auth.test/device"),
     do: %Metadata{
@@ -29,27 +32,36 @@ defmodule WardrikOAuth.PartsTest do
              "_x"
   end
 
+  test "needs a key that names its OAuth app" do
+    assert_raise NimbleOptions.ValidationError, ~r/required :key option not found/, fn ->
+      Provider.new(:test, issuer: @issuer, client_id: "client")
+    end
+
+    assert Provider.schema().schema[:key][:required]
+  end
+
   test "needs an issuer, a resource, or its endpoints" do
     assert_raise ArgumentError, ~r/needs an :issuer, a :resource, or its endpoints/, fn ->
-      Provider.new(:test, client_id: "client")
+      Provider.new(:test, key: "test", client_id: "client")
     end
   end
 
   test "sends a secret in the form or a Basic header, and no other way" do
     assert_raise NimbleOptions.ValidationError, ~r/:client_auth.*\[:post, :basic\]/, fn ->
-      Provider.new(:test, issuer: @issuer, client_id: "client", client_auth: :jwt)
+      Provider.new(:test, key: "test", issuer: @issuer, client_id: "client", client_auth: :jwt)
     end
   end
 
   test "refuses an option it doesn't take" do
     assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:scope\]/, fn ->
-      Provider.new(:test, issuer: @issuer, scope: ["repo"])
+      Provider.new(:test, key: "test", issuer: @issuer, scope: ["repo"])
     end
   end
 
   test "keeps the params a browser sign-in sets itself" do
     assert_raise NimbleOptions.ValidationError, ~r/can't set state/, fn ->
       Provider.new(:test,
+        key: "test",
         issuer: @issuer,
         client_id: "client",
         authorization_params: [state: "x"]
@@ -93,13 +105,15 @@ defmodule WardrikOAuth.PartsTest do
 
     test "needs the resource to name an authorization server" do
       serve(fn _path, conn -> Req.Test.json(conn, %{}) end)
-      resource = Provider.new(:test, resource: "https://mcp.test/mcp", client_id: "client")
+
+      resource =
+        Provider.new(:test, key: "test", resource: "https://mcp.test/mcp", client_id: "client")
 
       assert {:error, {:no_authorization_server, _url}} = Metadata.discover(resource, @req)
     end
 
     test "won't ask an insecure URL" do
-      insecure = Provider.new(:test, issuer: "http://auth.test", client_id: "client")
+      insecure = Provider.new(:test, key: "test", issuer: "http://auth.test", client_id: "client")
       assert {:error, {:insecure_url, _url}} = Metadata.discover(insecure, @req)
     end
 

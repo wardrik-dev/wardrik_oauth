@@ -50,15 +50,19 @@ defmodule WardrikOAuth.ResolverTest do
     do: Agent.update(apps, &Map.put(&1, {principal.id, name}, result))
 
   defp app(key, client_id, secret \\ nil) do
-    opts = [issuer: GitHub.issuer()] ++ if(client_id, do: [client_id: client_id], else: [])
-    provider = Provider.new("github", opts)
-    {:ok, %{provider | key: key, client_secret: secret}}
+    opts =
+      [key: key, issuer: GitHub.issuer()] ++
+        if(client_id, do: [client_id: client_id], else: []) ++
+        if(secret, do: [client_secret: secret], else: [])
+
+    {:ok, Provider.new("github", opts)}
   end
 
-  defp client_id({_signs_in, url}), do: URI.decode_query(URI.parse(url).query)["client_id"]
+  defp client_id({:ok, %{url: url}}), do: client_id({:authorize, url})
+  defp client_id({:authorize, url}), do: URI.decode_query(URI.parse(url).query)["client_id"]
 
   defp sign_in(oauth, principal) do
-    {:ok, url} = WardrikOAuth.authorize(oauth, "github", principal)
+    {:ok, %{url: url}} = WardrikOAuth.authorize(oauth, "github", principal)
     state = URI.decode_query(URI.parse(url).query)["state"]
     params = %{"state" => state, "code" => "c", "iss" => GitHub.issuer()}
     {:ok, _signed_in} = WardrikOAuth.finish(oauth, params, as: principal)
@@ -103,9 +107,9 @@ defmodule WardrikOAuth.ResolverTest do
     give(apps, @jon, "github", app("acme-github", nil))
     give(apps, @ada, "github", app("globex-github", nil))
 
-    assert {:ok, _url} = WardrikOAuth.authorize(oauth, "github", @jon)
+    assert {:ok, _sign_in} = WardrikOAuth.authorize(oauth, "github", @jon)
     assert_receive {:registered, _request}
-    assert {:ok, _url} = WardrikOAuth.authorize(oauth, "github", @ada)
+    assert {:ok, _sign_in} = WardrikOAuth.authorize(oauth, "github", @ada)
     assert_receive {:registered, _request}
   end
 
@@ -152,12 +156,12 @@ defmodule WardrikOAuth.ResolverTest do
 
   test "forgets the client it registered for an app", %{oauth: oauth, apps: apps} do
     give(apps, @jon, "github", app("acme-github", nil))
-    assert {:ok, _url} = WardrikOAuth.authorize(oauth, "github", @jon)
+    assert {:ok, _sign_in} = WardrikOAuth.authorize(oauth, "github", @jon)
     assert_receive {:registered, _request}
 
     assert :ok = WardrikOAuth.forget_client(oauth, "acme-github")
     give(apps, @ada, "github", app("acme-github", nil))
-    assert {:ok, _url} = WardrikOAuth.authorize(oauth, "github", @ada)
+    assert {:ok, _sign_in} = WardrikOAuth.authorize(oauth, "github", @ada)
     assert_receive {:registered, _request}
   end
 end

@@ -6,12 +6,15 @@
 - `forget_client/2` forgets the client Wardrik registered for a provider's key.
 - Each token records the key of the provider that issued it. Only that provider refreshes it.
 - Provider and start options are validated with NimbleOptions, and documented from the schema.
+  `WardrikOAuth.Provider.schema/0` returns the provider's.
 
 ### Breaking
 
 - `:resolver` is required. It gives the provider each user signs in with, by name, with a `key`
   naming its OAuth app. See `WardrikOAuth.Resolver`.
 - `:providers`, `add_provider/3`, `remove_provider/2` and `providers/1` are gone.
+- `WardrikOAuth.Provider.new/2` requires `:key`, and takes a `nil` `:client_secret`.
+- `authorize/3` returns `{:ok, %{url: url}}`, with `:code` for a device sign-in.
 - A provider's `client_secret` is the secret itself, not `{:secret, name}`.
 - A token kept by rc.1 records no provider, so its user signs in again once.
 - `finish/3` takes `as:`, who is at the browser, and finishes only their own sign-in. Anyone else

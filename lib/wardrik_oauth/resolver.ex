@@ -14,8 +14,8 @@ defmodule WardrikOAuth.Resolver do
               {:error, :not_found}
 
             app ->
-              provider = WardrikOAuth.Provider.new(name, app.options)
-              {:ok, %{provider | key: app.id, client_secret: MyApp.Secrets.read!(app.secret)}}
+              opts = [key: app.id, client_secret: MyApp.Secrets.read!(app.secret)] ++ app.options
+              {:ok, WardrikOAuth.Provider.new(name, opts)}
           end
         end
       end

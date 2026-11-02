@@ -125,7 +125,7 @@ defmodule WardrikOAuthTest do
   end
 
   defp sign_in(oauth, name, principal) do
-    {:ok, url} = WardrikOAuth.authorize(oauth, name, principal)
+    {:ok, %{url: url}} = WardrikOAuth.authorize(oauth, name, principal)
 
     WardrikOAuth.finish(
       oauth,
@@ -151,7 +151,7 @@ defmodule WardrikOAuthTest do
 
   describe "a provider without a client ID" do
     test "keeps a registered client's secret sealed in the vault", %{oauth: oauth, store: store} do
-      {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @acme_jon)
+      {:ok, %{url: url}} = WardrikOAuth.authorize(oauth, "tracker", @acme_jon)
 
       assert WardrikStore.get(store, "registrations/fixed/tracker") == %{
                "client_id" => "registered-client"
@@ -168,7 +168,7 @@ defmodule WardrikOAuthTest do
     end
 
     test "registers Wardrik with a service once, and signs in through it", %{oauth: oauth} do
-      assert {:ok, url} = WardrikOAuth.authorize(oauth, "tracker", @jon)
+      assert {:ok, %{url: url}} = WardrikOAuth.authorize(oauth, "tracker", @jon)
       assert URI.decode_query(URI.parse(url).query)["client_id"] == "registered-client"
 
       assert_receive {:registered,
@@ -178,14 +178,16 @@ defmodule WardrikOAuthTest do
                         "token_endpoint_auth_method" => "none"
                       }}
 
-      assert {:ok, _url} = WardrikOAuth.authorize(oauth, "tracker", %Principal{id: "user:ada"})
+      assert {:ok, _sign_in} =
+               WardrikOAuth.authorize(oauth, "tracker", %Principal{id: "user:ada"})
+
       refute_received {:registered, _request}
     end
 
     test "is the client of a service that reads its document by the document's URL", %{
       oauth: oauth
     } do
-      assert {:ok, url} = WardrikOAuth.authorize(oauth, "documents", @jon)
+      assert {:ok, %{url: url}} = WardrikOAuth.authorize(oauth, "documents", @jon)
 
       assert URI.decode_query(URI.parse(url).query)["client_id"] ==
                "https://agents.test/oauth/client"
@@ -230,7 +232,7 @@ defmodule WardrikOAuthTest do
         id: :local_oauth
       )
 
-      assert {:ok, url} = WardrikOAuth.authorize(:local_oauth, "documents", @jon)
+      assert {:ok, %{url: url}} = WardrikOAuth.authorize(:local_oauth, "documents", @jon)
       assert URI.decode_query(URI.parse(url).query)["client_id"] == "registered-client"
 
       assert_received {:registered,
@@ -253,6 +255,10 @@ defmodule WardrikOAuthTest do
                WardrikOAuth.flow(oauth, id)
 
       assert WardrikVault.resolve(credential("github", @jon), vault) == {:authorize, url}
+
+      assert WardrikOAuth.authorize(oauth, "github", @jon) ==
+               {:ok, %{url: "https://github.test/login/device", code: "WDJB-MJHT"}}
+
       assert WardrikOAuth.signing_in?(oauth, "github", @jon)
       refute WardrikOAuth.signing_in?(oauth, "github", @acme_jon)
       ended = flow_ended(oauth, "github", @jon)

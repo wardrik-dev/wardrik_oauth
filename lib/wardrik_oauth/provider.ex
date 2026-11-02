@@ -1,5 +1,13 @@
 defmodule WardrikOAuth.Provider do
   @schema NimbleOptions.new!(
+            key: [
+              type: :string,
+              required: true,
+              doc: """
+              Names the OAuth app, unique to it, as `"github"` or an ID. Two keys never share a
+              client or a token.
+              """
+            ],
             issuer: [
               type: :string,
               doc: "The authorization server, whose metadata names its endpoints."
@@ -23,7 +31,10 @@ defmodule WardrikOAuth.Provider do
               service allows. See `WardrikOAuth.Registration`.
               """
             ],
-            client_secret: [type: :string, doc: "Your OAuth app's client secret."],
+            client_secret: [
+              type: {:or, [:string, nil]},
+              doc: "Your OAuth app's client secret, or `nil` for none."
+            ],
             client_auth: [
               type: {:in, [:post, :basic]},
               default: :post,
@@ -49,6 +60,7 @@ defmodule WardrikOAuth.Provider do
   An OAuth app with a service. Its name is the credential a tool asks for.
 
       WardrikOAuth.Provider.new("github",
+        key: "github",
         issuer: "https://github.com/login/oauth",
         client_id: System.fetch_env!("GITHUB_CLIENT_ID"),
         client_secret: System.fetch_env!("GITHUB_CLIENT_SECRET"),
@@ -61,16 +73,12 @@ defmodule WardrikOAuth.Provider do
   #{NimbleOptions.docs(@schema)}
 
   A provider needs an `:issuer`, a `:resource`, or both endpoints.
-
-  Your `WardrikOAuth.Resolver` gives each provider a `key` naming its OAuth app:
-
-      %{WardrikOAuth.Provider.new("github", app.options) | key: app.id}
   """
 
   @own_params ~w(response_type client_id redirect_uri scope state code_challenge code_challenge_method resource)
 
   @derive {Inspect, except: [:client_secret]}
-  @enforce_keys [:name]
+  @enforce_keys [:name, :key]
   defstruct [
     :name,
     :key,
@@ -89,7 +97,7 @@ defmodule WardrikOAuth.Provider do
   @typedoc "An OAuth app with a service."
   @type t() :: %__MODULE__{
           name: String.t(),
-          key: String.t() | nil,
+          key: String.t(),
           issuer: String.t() | nil,
           resource: String.t() | nil,
           client_id: String.t() | nil,
@@ -121,6 +129,10 @@ defmodule WardrikOAuth.Provider do
           "The #{name} provider needs an :issuer, a :resource, or its endpoints"
         )
   end
+
+  @doc "Returns `new/2`'s options as a `NimbleOptions` schema."
+  @spec schema() :: NimbleOptions.t()
+  def schema, do: @schema
 
   @doc "Returns whether the provider names both endpoints, so none need discovering."
   @spec endpoints?(t()) :: boolean()

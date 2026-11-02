@@ -36,15 +36,15 @@ defmodule MyApp.OAuthApps do
 
   @impl true
   def provider(%{name: "google"}, _opts) do
-    google =
-      Provider.new("google",
-        issuer: "https://accounts.google.com",
-        client_id: System.fetch_env!("GOOGLE_CLIENT_ID"),
-        scopes: ~w(openid email https://www.googleapis.com/auth/calendar.readonly),
-        authorization_params: %{access_type: "offline", prompt: "consent"}
-      )
-
-    {:ok, %{google | key: "google", client_secret: System.fetch_env!("GOOGLE_CLIENT_SECRET")}}
+    {:ok,
+     Provider.new("google",
+       key: "google",
+       issuer: "https://accounts.google.com",
+       client_id: System.fetch_env!("GOOGLE_CLIENT_ID"),
+       client_secret: System.fetch_env!("GOOGLE_CLIENT_SECRET"),
+       scopes: ~w(openid email https://www.googleapis.com/auth/calendar.readonly),
+       authorization_params: %{access_type: "offline", prompt: "consent"}
+     )}
   end
 
   def provider(%{name: "linear", principal: user}, _opts) do
@@ -53,15 +53,15 @@ defmodule MyApp.OAuthApps do
         {:error, :not_found}
 
       app ->
-        linear =
-          Provider.new("linear",
-            authorization_endpoint: "https://linear.app/oauth/authorize",
-            token_endpoint: "https://api.linear.app/oauth/token",
-            client_id: app.client_id,
-            scopes: ~w(read)
-          )
-
-        {:ok, %{linear | key: "linear/" <> app.id, client_secret: app.client_secret}}
+        {:ok,
+         Provider.new("linear",
+           key: "linear/" <> app.id,
+           authorization_endpoint: "https://linear.app/oauth/authorize",
+           token_endpoint: "https://api.linear.app/oauth/token",
+           client_id: app.client_id,
+           client_secret: app.client_secret,
+           scopes: ~w(read)
+         )}
     end
   end
 

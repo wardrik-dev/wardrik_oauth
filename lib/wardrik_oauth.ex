@@ -109,13 +109,23 @@ defmodule WardrikOAuth do
   def forget_client(oauth, key), do: oauth |> settings() |> Registration.forget(key)
 
   @doc """
-  Returns the URL where `principal` signs in with the provider `name`.
+  Starts `principal`'s sign-in with the provider `name`, or returns the one under way.
 
-  Starts a sign-in, or returns the URL of the one under way.
+      WardrikOAuth.authorize(MyApp.OAuth, "github", principal)
+      #=> {:ok, %{url: "https://github.com/login/oauth/authorize?..."}}
+
+      WardrikOAuth.authorize(MyApp.OAuth, "linear", principal)
+      #=> {:ok, %{url: "https://linear.app/device", code: "WDJB-MJHT"}}
+
+  A device sign-in gives the `code` to enter at `url`.
   """
-  @spec authorize(atom(), String.t(), Principal.t()) :: {:ok, String.t()} | {:error, term()}
+  @spec authorize(atom(), String.t(), Principal.t()) ::
+          {:ok, %{required(:url) => String.t(), optional(:code) => String.t()}} | {:error, term()}
   def authorize(oauth, name, principal) do
-    with {:authorize, url} <- begin(settings(oauth), name, principal), do: {:ok, url}
+    settings = settings(oauth)
+
+    with {:ok, provider} <- resolve(settings, name, principal),
+         do: Flow.sign_in(settings, provider, principal)
   end
 
   @doc """
