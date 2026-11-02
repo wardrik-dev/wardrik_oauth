@@ -2,12 +2,17 @@
 
 ## 0.1.0-rc.2 (2026-10-31)
 
-- Providers belong to an owner: the deployment, an org or a person. A principal signs in with the
-  nearest of a name along `Wardrik.Owners.chain/1`.
+- `:resolver`, `WardrikOAuth.Resolver`: your app says which provider each principal signs in
+  with by name. Each provider has a `key` naming its OAuth app, which keeps its registered client
+  apart from every other app's.
+- Each grant records the key of the provider that issued it, and an expired one is refreshed only
+  by that provider. A principal who now resolves to another signs in again with it. Grants kept
+  by rc.1 came from the deployment's provider, and are refreshed only by it.
+- Without `:resolver`, providers belong to an owner: the deployment, an org or a person. A
+  principal signs in with the nearest of a name along `Wardrik.Owners.chain/1`. See
+  `WardrikOAuth.Owners`.
 - A runtime provider's `client_secret` is only `{:secret, name}`, read from its owner's vault each
   time it's needed.
-- Each grant records the owner of the provider that issued it, and is renewed with that provider.
-  Grants kept by rc.1 resolve along the chain.
 - Provider and start options are validated with NimbleOptions, documented from the schema.
 
 ### Breaking

@@ -558,7 +558,8 @@ defmodule WardrikOAuthTest do
 
       {:ok, json} = WardrikVault.fetch(vault, @jon, "github")
 
-      assert {:ok, %Token{access_token: "fresh", refresh_token: "rt", owner: @deployment}} =
+      assert {:ok,
+              %Token{access_token: "fresh", refresh_token: "rt", provider: "deployment/github"}} =
                Token.decode(json)
     end
 
@@ -641,39 +642,43 @@ defmodule WardrikOAuthTest do
       assert {:ok, %{provider: "crm"}} = sign_in(oauth, "crm", @acme_jon)
 
       {:ok, json} = WardrikVault.fetch(vault, @acme_jon, "crm")
-      assert {:ok, %Token{owner: "acme"}} = Token.decode(json)
+      assert {:ok, %Token{provider: "acme/crm"}} = Token.decode(json)
       assert WardrikVault.fetch(vault, %Principal{id: "acme"}, "crm") == {:error, :not_found}
     end
 
-    test "renew a grant with the provider that issued it", %{oauth: oauth, vault: vault} do
+    test "renew a grant only with the provider that issued it", %{oauth: oauth, vault: vault} do
+      keep_crm(vault, provider: "acme/crm")
+      assert WardrikVault.resolve("crm", @acme_jon, vault) == {:ok, "fresh"}
+      assert_received {:refreshed_as, "acme-crm", "acme-secret"}
+
+      {:ok, json} = WardrikVault.fetch(vault, @acme_jon, "crm")
+      assert {:ok, %Token{access_token: "fresh", provider: "acme/crm"}} = Token.decode(json)
+
+      :ok = WardrikVault.delete(vault, %Principal{id: "acme"}, "SECRET")
+      keep_crm(vault, provider: "acme/crm")
+      assert {:error, "crm's client_secret" <> _} = WardrikVault.resolve("crm", @acme_jon, vault)
+
       :ok =
         WardrikOAuth.add_provider(oauth, "acme/@jon", "crm",
           issuer: GitHub.issuer(),
           client_id: "jon-crm"
         )
 
-      keep_crm(vault, owner: "acme")
-      assert WardrikVault.resolve("crm", @acme_jon, vault) == {:ok, "fresh"}
-      assert_received {:refreshed_as, "acme-crm", "acme-secret"}
-
-      {:ok, json} = WardrikVault.fetch(vault, @acme_jon, "crm")
-      assert {:ok, %Token{access_token: "fresh", owner: "acme"}} = Token.decode(json)
-
-      :ok = WardrikVault.delete(vault, %Principal{id: "acme"}, "SECRET")
-      keep_crm(vault, owner: "acme")
-      assert {:error, "crm's client_secret" <> _} = WardrikVault.resolve("crm", @acme_jon, vault)
-
-      :ok = WardrikOAuth.remove_provider(oauth, "acme", "crm")
-      keep_crm(vault, owner: "acme")
+      keep_crm(vault, provider: "acme/crm")
       assert {:authorize, url} = WardrikVault.resolve("crm", @acme_jon, vault)
       assert client_id({:authorize, url}) == "jon-crm"
       refute_received {:refreshed_as, _id, _secret}
     end
 
-    test "renew a grant kept before its provider was recorded", %{vault: vault} do
+    test "renew a grant kept before its provider was recorded only with the deployment's", %{
+      vault: vault
+    } do
+      {:ok, _vsn} = keep(vault, token(access_token: "old", refresh_token: "rt", expires_at: 0))
+      assert WardrikVault.resolve("github", @jon, vault) == {:ok, "fresh"}
+
       keep_crm(vault, [])
-      assert WardrikVault.resolve("crm", @acme_jon, vault) == {:ok, "fresh"}
-      assert_received {:refreshed_as, "acme-crm", "acme-secret"}
+      assert {:authorize, _url} = WardrikVault.resolve("crm", @acme_jon, vault)
+      refute_received {:refreshed_as, "acme-crm", _secret}
     end
   end
 

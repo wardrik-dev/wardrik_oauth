@@ -62,7 +62,7 @@ defmodule WardrikOAuth.Renewal do
   defp exchange(settings, provider, principal, token, vsn) do
     case post_refresh(settings, provider, token) do
       {:ok, fresh} ->
-        fresh = %{Token.carry_refresh(fresh, token) | owner: provider.owner}
+        fresh = %{Token.carry_refresh(fresh, token) | provider: provider.key}
 
         WardrikVault.put(settings.vault, principal, provider.name, Token.encode(fresh),
           kind: :grant,

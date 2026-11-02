@@ -16,28 +16,25 @@ defmodule WardrikOAuth do
   Mount `WardrikOAuth.Plug` at `page` to finish sign-ins. See `WardrikOAuth.Provider` for provider
   options.
 
-  Providers belong to owners. Those in `:providers` are the deployment's, and `add_provider/4`
-  adds an org's or a person's. A principal signs in with the nearest provider of a name along
-  `Wardrik.Owners.chain/1`.
+  With `:resolver`, your app says which provider each principal signs in with. See
+  `WardrikOAuth.Resolver`. Without it, providers belong to owners: those in `:providers` are the
+  deployment's, and `add_provider/4` adds an org's or a person's. See `WardrikOAuth.Owners`.
 
-  A provider's `client_secret` may be `{:secret, name}`. It's read from its owner's vault secrets
-  each time it's needed, so a new one takes effect at once.
-
-  Grants never fall back. Each belongs to the principal who signed in, and is renewed with the
-  provider that issued it. If that provider is gone, the principal signs in again.
+  Grants never fall back. Each belongs to the principal who signed in, and is refreshed only by
+  the provider that issued it. If they now sign in with another, they sign in again.
   """
 
   @behaviour WardrikVault.Grants
 
   use Supervisor
 
-  alias Wardrik.Owners
-  alias Wardrik.Resource
   alias WardrikCore.Principal
   alias WardrikOAuth.Flow
+  alias WardrikOAuth.Owners
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Registration
   alias WardrikOAuth.Renewal
+  alias WardrikOAuth.Resolver
   alias WardrikOAuth.Token
 
   @schema NimbleOptions.new!(
@@ -55,10 +52,21 @@ defmodule WardrikOAuth do
               The URL `WardrikOAuth.Plug` is mounted at, as `"https://agents.example.com/oauth"`.
               """
             ],
+            resolver: [
+              type: {:or, [:mod_arg, nil]},
+              default: nil,
+              doc: """
+              `{module, config}`, the `WardrikOAuth.Resolver` that gives each principal's
+              providers. Without it, they're resolved along the owner chain.
+              """
+            ],
             providers: [
               type: {:list, {:tuple, [{:or, [:atom, :string]}, :keyword_list]}},
               default: [],
-              doc: "Providers to start with, by name. See `WardrikOAuth.Provider`."
+              doc: """
+              The deployment's providers, by name, without `:resolver`. See
+              `WardrikOAuth.Provider`.
+              """
             ],
             on_granted: [
               type: {:or, [:mfa, nil]},
@@ -100,11 +108,15 @@ defmodule WardrikOAuth do
   def start_link(opts) do
     opts = NimbleOptions.validate!(opts, @schema)
     name = Keyword.fetch!(opts, :name)
+
+    if opts[:resolver] && opts[:providers] != [],
+      do: raise(ArgumentError, "Give providers through :resolver, not :providers, when it's set")
+
     Supervisor.start_link(__MODULE__, Map.new(opts), name: name)
   end
 
   @doc """
-  Adds `owner`'s provider `name` at runtime, on every node.
+  Adds `owner`'s provider `name` at runtime, on every node, without `:resolver`.
 
       :ok =
         WardrikOAuth.add_provider(MyApp.OAuth, "acme", "linear",
@@ -123,26 +135,30 @@ defmodule WardrikOAuth do
        the URL of the document `WardrikOAuth.Plug` serves.
     2. Otherwise, Wardrik registers itself with the service.
 
-  Returns `{:error, reason}` for invalid options, a `client_secret` given as is, or the
-  deployment's provider of a name in `:providers`.
+  Returns `{:error, reason}` for invalid options, a `client_secret` given as is, the
+  deployment's provider of a name in `:providers`, or with `:resolver`.
   """
-  @spec add_provider(atom(), Owners.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  @spec add_provider(atom(), Wardrik.Owners.t(), String.t(), keyword()) ::
+          :ok | {:error, String.t()}
   def add_provider(oauth, owner, name, opts) when is_binary(owner) and is_binary(name) do
     settings = settings(oauth)
     Provider.new(name, opts)
 
     cond do
-      Owners.parse(owner) == :error ->
+      settings.resolver ->
+        {:error, "providers come from the resolver"}
+
+      Wardrik.Owners.parse(owner) == :error ->
         {:error, "#{owner} isn't an owner"}
 
       is_binary(opts[:client_secret]) ->
         {:error, "#{name}'s client_secret must be {:secret, name}"}
 
-      Map.has_key?(configured(settings, owner), name) ->
+      Owners.configured?(settings, owner, name) ->
         {:error, "#{name} is a provider the app starts with"}
 
       true ->
-        with {:ok, _vsn} <- WardrikStore.put(settings.store, provider_key(owner, name), opts),
+        with {:ok, _vsn} <- WardrikStore.put(settings.store, Owners.store_key(owner, name), opts),
              do: :ok
     end
   rescue
@@ -158,12 +174,12 @@ defmodule WardrikOAuth do
   def client_document(oauth), do: oauth |> settings() |> Registration.document()
 
   @doc "Removes `owner`'s provider `name`, added at runtime, and the client registered for it."
-  @spec remove_provider(atom(), Owners.t(), String.t()) :: :ok | {:error, term()}
+  @spec remove_provider(atom(), Wardrik.Owners.t(), String.t()) :: :ok | {:error, term()}
   def remove_provider(oauth, owner, name) do
     settings = settings(oauth)
 
-    with :ok <- WardrikStore.delete(settings.store, provider_key(owner, name)),
-         do: Registration.forget(settings, owner, name)
+    with :ok <- WardrikStore.delete(settings.store, Owners.store_key(owner, name)),
+         do: Registration.forget(settings, Owners.key(owner, name))
   end
 
   @doc """
@@ -173,20 +189,18 @@ defmodule WardrikOAuth do
       #=> [%WardrikOAuth.Provider{name: "linear", owner: "acme", source: :runtime, ...}, ...]
 
   Only the nearest provider of each name is given. A `client_secret` is as it was given, not read.
+  With `:resolver`, there are none: your app knows its own.
   """
-  @spec providers(atom(), Owners.t()) :: [Provider.t()]
+  @spec providers(atom(), Wardrik.Owners.t()) :: [Provider.t()]
   def providers(oauth, owner) do
-    settings = settings(oauth)
-
-    owner
-    |> Owners.chain()
-    |> Enum.flat_map(&owned(settings, &1))
-    |> Enum.uniq_by(& &1.name)
+    case settings(oauth) do
+      %{resolver: nil} = settings -> Owners.providers(settings, owner)
+      _resolved -> []
+    end
   end
 
   @doc """
-  Returns the URL where `principal` signs in with the provider `name`, the nearest along
-  `Wardrik.Owners.chain/1`.
+  Returns the URL where `principal` signs in with the provider `name`, as it resolves for them.
 
   Starts a sign-in, or returns the URL of the one already under way.
   """
@@ -273,7 +287,7 @@ defmodule WardrikOAuth do
       settings.vault,
       principal,
       provider.name,
-      Token.encode(%{token | owner: provider.owner}),
+      Token.encode(%{token | provider: provider.key}),
       [kind: :grant] ++ condition
     )
   end
@@ -285,9 +299,10 @@ defmodule WardrikOAuth do
       store: opts |> Map.fetch!(:store) |> WardrikStore.scope("wardrik_oauth"),
       client_name: opts.client_name,
       page: opts |> Map.fetch!(:page) |> String.trim_trailing("/"),
+      resolver: opts.resolver,
       providers:
         Map.new(opts.providers, fn {name, provider} ->
-          {to_string(name), Provider.new(name, provider)}
+          {to_string(name), Owners.deployment(name, provider)}
         end),
       on_granted: opts.on_granted,
       req_options: checked(opts.check) ++ opts.req_options,
@@ -323,80 +338,45 @@ defmodule WardrikOAuth do
          do: Flow.begin(settings, provider, principal)
   end
 
+  # A fresh token is used as it is. An expired one is refreshed only by the provider that issued
+  # it, so its refresh token and the provider's client never meet another app's.
   defp renewed(settings, name, principal, value) do
-    with {:ok, token} <- Token.decode(value),
-         {:ok, provider} <- issuer(settings, name, principal, token) do
-      Renewal.renew(settings, provider, principal, token)
-    else
-      {:error, reason} when reason in [:unreadable, :not_found] -> :ask
-      {:error, reason} -> {:error, reason}
+    case Token.decode(value) do
+      {:ok, token} ->
+        if Token.fresh?(token),
+          do: {:ok, token.access_token},
+          else: refreshed(settings, name, principal, token)
+
+      {:error, :unreadable} ->
+        :ask
     end
   end
 
-  # Tokens kept before the issuing provider was recorded resolve as a sign-in would.
-  defp issuer(settings, name, principal, %Token{owner: nil}),
-    do: resolve(settings, name, principal)
+  defp refreshed(settings, name, principal, token) do
+    case resolve(settings, name, principal) do
+      {:ok, %Provider{key: key} = provider} ->
+        if key == issuer(settings, name, token),
+          do: Renewal.renew(settings, provider, principal, token),
+          else: :ask
 
-  defp issuer(settings, name, _principal, %Token{owner: owner}),
-    do: provider(settings, owner, name)
+      {:error, :not_found} ->
+        :ask
 
-  defp resolve(settings, name, %Principal{id: id}) do
-    id
-    |> Owners.chain()
-    |> Enum.find_value({:error, :not_found}, fn owner ->
-      case provider(settings, owner, name) do
-        {:error, :not_found} -> nil
-        found -> found
-      end
-    end)
-  end
-
-  defp provider(settings, owner, name) do
-    with {:ok, provider} <- defined(settings, owner, name), do: usable(settings, provider)
-  end
-
-  defp defined(settings, owner, name) do
-    with :error <- Map.fetch(configured(settings, owner), name) do
-      case WardrikStore.get(settings.store, provider_key(owner, name)) do
-        nil -> {:error, :not_found}
-        opts -> {:ok, added(owner, name, opts)}
-      end
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp owned(settings, owner) do
-    prefix = provider_key(owner, "")
+  # Tokens kept before the issuer was recorded came from the deployment's provider.
+  defp issuer(%{resolver: nil}, name, %Token{provider: nil}),
+    do: Owners.key(Wardrik.Resource.deployment(), name)
 
-    added =
-      for {key, opts, _vsn} <- WardrikStore.entries(settings.store, prefix),
-          do: added(owner, String.replace_prefix(key, prefix, ""), opts)
+  defp issuer(_settings, _name, %Token{provider: key}), do: key
 
-    Enum.sort_by(Map.values(configured(settings, owner)) ++ added, & &1.name)
+  defp resolve(settings, name, principal) do
+    with {:ok, provider} <- Resolver.resolve(settings, name, principal),
+         do: {:ok, Registration.registered(settings, provider)}
   end
-
-  defp configured(settings, owner),
-    do: if(owner == Resource.deployment(), do: settings.providers, else: %{})
-
-  defp added(owner, name, opts),
-    do: %{Provider.new(name, opts) | owner: owner, source: :runtime}
-
-  defp usable(settings, %Provider{client_secret: secret} = provider) do
-    case client_secret(settings, provider) do
-      {:ok, value} ->
-        {:ok, Registration.registered(settings, %{provider | client_secret: value})}
-
-      {:error, _reason} ->
-        {:error,
-         "#{provider.name}'s client_secret, #{inspect(secret)}, isn't sealed for #{provider.owner}"}
-    end
-  end
-
-  defp client_secret(settings, %Provider{client_secret: {:secret, name}, owner: owner}),
-    do: WardrikVault.fetch(settings.vault, %Principal{id: owner}, name, kind: :client_secret)
-
-  defp client_secret(_settings, %Provider{client_secret: secret}), do: {:ok, secret}
-
-  defp provider_key(owner, name), do: "providers/" <> Provider.path(owner, name)
 
   defp over_current(vault, principal, name) do
     case WardrikVault.lookup(vault, principal, name) do
