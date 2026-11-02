@@ -2,8 +2,7 @@ defmodule WardrikOAuth.Token do
   @moduledoc """
   A token an authorization server granted. Kept in the vault as JSON.
 
-  `provider` is the key of the provider that issued it. It's refreshed only by that provider, so
-  no other app's client sees it. Tokens kept before it was recorded have none.
+  `provider` is the key of the provider that issued it. Only that provider refreshes it.
   """
 
   alias WardrikOAuth.Request

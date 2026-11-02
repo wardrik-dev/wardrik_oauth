@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Resolver do
   @moduledoc """
-  Says which OAuth app each principal signs in with, by name.
+  Says which OAuth app each user signs in with, by name.
 
       {WardrikOAuth, name: MyApp.OAuth, resolver: {MyApp.OAuthApps, []}, ...}
 
@@ -20,12 +20,11 @@ defmodule WardrikOAuth.Resolver do
         end
       end
 
-  Wardrik resolves the provider as each sign-in starts, and as each expired grant is refreshed.
-  A grant is refreshed only by the provider whose `key` issued it. If the principal resolves to
-  another, they sign in again with it, so no app's client ever sees another app's grant.
-
-  The provider's `name` is the one asked for, its `key` names the OAuth app, unique to it, and
-  its `client_secret` is the secret itself, or `nil`. An error stops the sign-in with it.
+    * Called as each sign-in starts, and as each expired token is refreshed.
+    * Return a provider with the `name` asked for, a `key` unique to the OAuth app, and the
+      `client_secret` itself, or `nil`.
+    * If the `key` changed since the token was issued, the user signs in again.
+    * An error stops the sign-in.
   """
 
   alias WardrikOAuth.Provider

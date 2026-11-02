@@ -1,6 +1,6 @@
 defmodule WardrikOAuth do
   @moduledoc """
-  OAuth sign-in for WardrikCore agents. Grants are sealed in a `WardrikVault`.
+  OAuth sign-in for WardrikCore agents. Tokens are sealed in a `WardrikVault`.
 
       children = [
         {WardrikVault, name: MyApp.Vault, store: store, keys: keys, grants: {WardrikOAuth, MyApp.OAuth}},
@@ -13,11 +13,9 @@ defmodule WardrikOAuth do
          on_granted: {MyApp.Agents, :granted, []}}
       ]
 
-  Mount `WardrikOAuth.Plug` at `page` to finish sign-ins. `:resolver` says which provider each
-  principal signs in with. See `WardrikOAuth.Resolver` and `WardrikOAuth.Provider`.
-
-  Grants never fall back. Each belongs to the principal who signed in, and is refreshed only by
-  the provider that issued it. If they now sign in with another, they sign in again.
+    * Mount `WardrikOAuth.Plug` at `page` to finish sign-ins.
+    * `:resolver` gives the OAuth app each user signs in with. See `WardrikOAuth.Resolver`.
+    * A token is refreshed only by the OAuth app that issued it.
   """
 
   @behaviour WardrikVault.Grants
@@ -53,8 +51,7 @@ defmodule WardrikOAuth do
               type: :mod_arg,
               required: true,
               doc: """
-              `{module, config}`, the `WardrikOAuth.Resolver` that gives each principal's
-              providers.
+              `{module, config}`, the `WardrikOAuth.Resolver` that gives each user's providers.
               """
             ],
             on_granted: [
@@ -62,7 +59,7 @@ defmodule WardrikOAuth do
               default: nil,
               doc: """
               `{module, function, args}` called with the provider's name and the principal, then
-              `args`, after each grant.
+              `args`, after each sign-in.
               """
             ],
             client_name: [
@@ -79,8 +76,8 @@ defmodule WardrikOAuth do
               type: {:or, [{:fun, 1}, nil]},
               default: nil,
               doc: """
-              Called on each URL before a request is sent, returning `:ok` or `{:error, reason}`.
-              Use one when users add providers by URL. Without it, any `https` URL, and `http` on
+              Called on each URL before a request, returning `:ok` or `{:error, reason}`. Use one
+              when users add providers by URL. Without it, any `https` URL, and `http` on
               localhost, is reached.
               """
             ]
@@ -99,28 +96,22 @@ defmodule WardrikOAuth do
     Supervisor.start_link(__MODULE__, Map.new(opts), name: Keyword.fetch!(opts, :name))
   end
 
-  @doc """
-  Returns the Client ID Metadata Document served at `{page}/client`.
-
-  Its URL is Wardrik's `client_id` with services that read these documents.
-  """
+  @doc "Returns the Client ID Metadata Document served at `{page}/client`."
   @spec client_document(atom()) :: map()
   def client_document(oauth), do: oauth |> settings() |> Registration.document()
 
   @doc """
-  Forgets the client Wardrik registered for the provider `key`, and its secret.
+  Forgets the client Wardrik registered for the provider `key`. Call it when you delete that app.
 
-  Call it once your app deletes the OAuth app `key` names, so the store keeps no client for it.
-
-      :ok = WardrikOAuth.forget_client(MyApp.OAuth, "acme/linear")
+      :ok = WardrikOAuth.forget_client(MyApp.OAuth, "linear/app_1")
   """
   @spec forget_client(atom(), String.t()) :: :ok | {:error, term()}
   def forget_client(oauth, key), do: oauth |> settings() |> Registration.forget(key)
 
   @doc """
-  Returns the URL where `principal` signs in with the provider `name`, as it resolves for them.
+  Returns the URL where `principal` signs in with the provider `name`.
 
-  Starts a sign-in, or returns the URL of the one already under way.
+  Starts a sign-in, or returns the URL of the one under way.
   """
   @spec authorize(atom(), String.t(), Principal.t()) :: {:ok, String.t()} | {:error, term()}
   def authorize(oauth, name, principal) do
@@ -128,10 +119,10 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Describes the device sign-in `id`.
+  Describes the device sign-in `id`, for a CLI to show its code.
 
   Returns `{:ok, map}` with `:provider`, `:principal`, `:user_code` and `:verification_uri`, or
-  `:error` if the sign-in has ended.
+  `:error` if it has ended.
   """
   @spec flow(atom(), String.t()) :: {:ok, map()} | :error
   def flow(oauth, id) do
@@ -141,6 +132,18 @@ defmodule WardrikOAuth do
     end
   end
 
+  @doc """
+  Returns whether `principal`'s sign-in to the provider `name` is under way.
+
+      WardrikOAuth.signing_in?(MyApp.OAuth, "github", principal)
+      #=> true
+
+  `false` once it's granted, declined or expired.
+  """
+  @spec signing_in?(atom(), String.t(), Principal.t()) :: boolean()
+  def signing_in?(oauth, name, %Principal{id: id}),
+    do: Registry.lookup(registry(oauth), {:flow, name, id}) != []
+
   defp described(pid) do
     {:ok, Flow.describe(pid)}
   catch
@@ -148,18 +151,15 @@ defmodule WardrikOAuth do
   end
 
   @doc """
-  Finishes a browser sign-in from its callback's query params, for the principal `as` names.
+  Finishes a browser sign-in from its callback's query params. `WardrikOAuth.Plug` calls it.
 
       WardrikOAuth.finish(MyApp.OAuth, params, as: current_principal)
-      #=> {:ok, %{provider: "github", principal: %WardrikCore.Principal{id: "acme/@jon"}}}
+      #=> {:ok, %{provider: "github", principal: %WardrikCore.Principal{id: "user:jon"}}}
 
-  The params carry `"state"`, and `"code"` or `"error"`. Only the principal who started the sign-in
-  can finish it: anyone else gets `{:error, :wrong_principal}`, and the sign-in stays open for
-  them. That stops someone else's link from connecting your account to their agents. Returns
-  `{:error, :no_such_flow}` if the sign-in has ended.
+  `as:` is who is signed in to your app at the browser.
 
-  `as` is whoever your app knows is at the browser, as from their session. `WardrikOAuth.Plug`
-  calls this with the principal its `:principal` option returns.
+    * `{:error, :wrong_principal}` - someone else started it. It stays open for them.
+    * `{:error, :no_such_flow}` - it has ended.
   """
   @spec finish(atom(), map(), keyword()) ::
           {:ok, %{provider: String.t(), principal: Principal.t()}} | {:error, term()}

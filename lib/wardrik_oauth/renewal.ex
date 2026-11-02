@@ -1,8 +1,7 @@
 defmodule WardrikOAuth.Renewal do
   @moduledoc """
-  Keeps a principal's grant usable by refreshing it when it expires.
-
-  Refreshes take a cluster-wide lock, so two nodes never spend the same refresh token.
+  Refreshes expired tokens. A cluster-wide lock keeps two nodes from spending the same refresh
+  token.
   """
 
   alias WardrikCore.Principal
@@ -12,8 +11,7 @@ defmodule WardrikOAuth.Renewal do
   alias WardrikVault.Secret
 
   @doc """
-  Returns the access token of the `:principal`'s grant `:token`, refreshing it first with
-  `:provider` if it has expired.
+  Returns the access token of `:token`, refreshing it first with `:provider` if it has expired.
 
       Renewal.renew(settings, provider: provider, principal: principal, token: token)
 

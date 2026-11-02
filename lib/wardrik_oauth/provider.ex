@@ -46,7 +46,7 @@ defmodule WardrikOAuth.Provider do
           )
 
   @moduledoc """
-  An OAuth app with a service. It has the same name as the credential it grants.
+  An OAuth app with a service. Its name is the credential a tool asks for.
 
       WardrikOAuth.Provider.new("github",
         issuer: "https://github.com/login/oauth",
@@ -62,8 +62,7 @@ defmodule WardrikOAuth.Provider do
 
   A provider needs an `:issuer`, a `:resource`, or both endpoints.
 
-  Its `key` names the OAuth app, so two apps never share a client or a grant. Your resolver gives
-  each provider a key of its own (see `WardrikOAuth.Resolver`):
+  Your `WardrikOAuth.Resolver` gives each provider a `key` naming its OAuth app:
 
       %{WardrikOAuth.Provider.new("github", app.options) | key: app.id}
   """
@@ -87,7 +86,7 @@ defmodule WardrikOAuth.Provider do
     authorization_params: %{}
   ]
 
-  @typedoc "An OAuth app a principal can grant access to."
+  @typedoc "An OAuth app with a service."
   @type t() :: %__MODULE__{
           name: String.t(),
           key: String.t() | nil,

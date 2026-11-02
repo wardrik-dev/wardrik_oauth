@@ -1,6 +1,6 @@
 defmodule WardrikOAuth.Device do
   @moduledoc """
-  Device sign-in (RFC 8628): the principal enters a code on any device.
+  Device sign-in (RFC 8628): the user enters a code on any device.
   """
 
   alias WardrikOAuth.Metadata

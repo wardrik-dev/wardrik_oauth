@@ -98,6 +98,12 @@ defmodule WardrikOAuthTest do
     %{vault: vault, oauth: oauth, store: WardrikStore.scope(store, "wardrik_oauth")}
   end
 
+  defp flow_ended(oauth, name, %Principal{id: id}) do
+    [{pid, _value}] = Registry.lookup(Module.concat(oauth, Registry), {:flow, name, id})
+    ref = Process.monitor(pid)
+    {:DOWN, ref, :process, pid, :normal}
+  end
+
   defp get(oauth, path, as \\ @jon) do
     :get
     |> Plug.Test.conn(path)
@@ -247,11 +253,16 @@ defmodule WardrikOAuthTest do
                WardrikOAuth.flow(oauth, id)
 
       assert WardrikVault.resolve(credential("github", @jon), vault) == {:authorize, url}
+      assert WardrikOAuth.signing_in?(oauth, "github", @jon)
+      refute WardrikOAuth.signing_in?(oauth, "github", @acme_jon)
+      ended = flow_ended(oauth, "github", @jon)
 
       assert_receive {:granted, "github", "user:jon"}
       assert_receive {:done, :granted}
+      assert_receive ^ended
       assert WardrikVault.resolve(credential("github", @jon), vault) == {:ok, "gho_granted"}
       assert WardrikOAuth.flow(oauth, id) == :error
+      refute WardrikOAuth.signing_in?(oauth, "github", @jon)
     end
 
     @tag polls: [%{"error" => "access_denied"}]

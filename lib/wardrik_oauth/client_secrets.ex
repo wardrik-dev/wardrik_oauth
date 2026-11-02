@@ -1,8 +1,6 @@
 defmodule WardrikOAuth.ClientSecrets do
   @moduledoc """
-  Seals the secrets of clients Wardrik registers in the vault, not the store.
-
-  Secrets are kept under a principal of their own that no agent acts as.
+  Seals the secrets of clients Wardrik registers in the vault, under a principal no agent acts as.
   """
 
   alias WardrikCore.Principal
@@ -13,7 +11,7 @@ defmodule WardrikOAuth.ClientSecrets do
   @doc """
   Seals the `:secret` under `:name`. Does nothing if `:secret` is `nil`.
 
-      :ok = ClientSecrets.seal(settings, name: "acme/linear", secret: secret)
+      :ok = ClientSecrets.seal(settings, name: "linear/app_1", secret: secret)
   """
   @spec seal(map(), name: String.t(), secret: String.t() | nil) :: :ok | {:error, term()}
   def seal(settings, args) do

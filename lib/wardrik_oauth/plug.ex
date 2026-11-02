@@ -15,11 +15,9 @@ defmodule WardrikOAuth.Plug do
   ## Options
 
     * `:oauth` - required. The `WardrikOAuth` name.
-    * `:principal` - required. `{module, function, args}`, called with the conn and then `args`.
-      Returns the `WardrikCore.Principal` at the browser, as your app knows them from their
-      session, or `nil` if it can't tell. A callback finishes only for the principal who started
-      the sign-in, so someone else's link can't connect your account to their agents. See
-      `WardrikOAuth.finish/3`.
+    * `:principal` - required. `{module, function, args}`, called with the conn, then `args`.
+      Returns the `WardrikCore.Principal` signed in at the browser, or `nil`. Only they can
+      finish their own sign-in. See `WardrikOAuth.finish/3`.
   """
 
   @behaviour Plug

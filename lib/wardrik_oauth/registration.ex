@@ -2,7 +2,7 @@ defmodule WardrikOAuth.Registration do
   @moduledoc """
   Makes Wardrik a client of an authorization server it has no `client_id` for.
 
-  This happens once for each provider, by its key. The client is kept in the store for every node.
+  Happens once per provider key. The client is kept in the store.
 
     1. If the server reads Client ID Metadata Documents and `page` is `https`, the `client_id` is
        `{page}/client`. Nothing is registered.
