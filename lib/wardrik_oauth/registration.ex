@@ -2,7 +2,7 @@ defmodule WardrikOAuth.Registration do
   @moduledoc """
   Makes Wardrik a client of an authorization server it has no `client_id` for.
 
-  This happens once for each provider, by owner. The client is kept in the store for every node.
+  This happens once for each provider, by its key. The client is kept in the store for every node.
 
     1. If the server reads Client ID Metadata Documents and `page` is `https`, the `client_id` is
        `{page}/client`. Nothing is registered.
@@ -40,11 +40,11 @@ defmodule WardrikOAuth.Registration do
     end
   end
 
-  @doc "Deletes the client registered for `owner`'s provider `name`."
-  @spec forget(map(), Wardrik.Owners.t(), String.t()) :: :ok | {:error, term()}
-  def forget(settings, owner, name) do
-    with :ok <- WardrikStore.delete(settings.store, key(owner, name)),
-         do: ClientSecrets.forget(settings, key(owner, name))
+  @doc "Deletes the client registered for the provider `key`."
+  @spec forget(map(), String.t()) :: :ok | {:error, term()}
+  def forget(settings, key) do
+    with :ok <- WardrikStore.delete(settings.store, "registrations/" <> key),
+         do: ClientSecrets.forget(settings, "registrations/" <> key)
   end
 
   @doc "Returns the Client ID Metadata Document served at `{page}/client`."
@@ -120,6 +120,5 @@ defmodule WardrikOAuth.Registration do
     end
   end
 
-  defp key(%Provider{owner: owner, name: name}), do: key(owner, name)
-  defp key(owner, name), do: "registrations/" <> Provider.path(owner, name)
+  defp key(%Provider{key: key}), do: "registrations/" <> key
 end

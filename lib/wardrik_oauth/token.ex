@@ -2,15 +2,15 @@ defmodule WardrikOAuth.Token do
   @moduledoc """
   A token an authorization server granted. Kept in the vault as JSON.
 
-  `owner` is the owner of the provider that issued it, so it's renewed with that provider's
-  client. Tokens kept before it was recorded have none.
+  `provider` is the key of the provider that issued it. It's refreshed only by that provider, so
+  no other app's client sees it. Tokens kept before it was recorded have none.
   """
 
   alias WardrikOAuth.Request
 
   @derive {Inspect, only: [:expires_at, :scope]}
   @enforce_keys [:access_token, :token_endpoint]
-  defstruct [:access_token, :refresh_token, :expires_at, :scope, :token_endpoint, :owner]
+  defstruct [:access_token, :refresh_token, :expires_at, :scope, :token_endpoint, :provider]
 
   @typedoc "An access token and what came with it."
   @type t() :: %__MODULE__{
@@ -19,11 +19,11 @@ defmodule WardrikOAuth.Token do
           expires_at: integer() | nil,
           scope: String.t() | nil,
           token_endpoint: String.t(),
-          owner: Wardrik.Owners.t() | nil
+          provider: String.t() | nil
         }
 
   @margin_seconds 30
-  @fields ~w(access_token refresh_token expires_at scope token_endpoint owner)
+  @fields ~w(access_token refresh_token expires_at scope token_endpoint provider)
 
   @doc "Reads a token endpoint's response. Returns the token, or the error it holds."
   @spec from_response(pos_integer(), map(), String.t()) :: {:ok, t()} | {:error, term()}
