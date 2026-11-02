@@ -37,6 +37,7 @@ defmodule WardrikOAuth do
   alias WardrikOAuth.Resolver
   alias WardrikOAuth.Token
   alias WardrikVault.Grants
+  alias WardrikVault.Secret
 
   @schema NimbleOptions.new!(
             name: [type: :atom, required: true, doc: "The name functions reach it by."],
@@ -285,13 +286,9 @@ defmodule WardrikOAuth do
   def keep(settings, provider, principal, %Token{} = token) do
     condition = over_current(settings.vault, principal, provider.name)
 
-    WardrikVault.put(
-      settings.vault,
-      principal,
-      provider.name,
-      Token.encode(%{token | provider: provider.key}),
-      [kind: :grant] ++ condition
-    )
+    value = Token.encode(%{token | provider: provider.key})
+    secret = %Secret{principal: principal, name: provider.name, value: value}
+    WardrikVault.put(settings.vault, secret, [kind: :grant] ++ condition)
   end
 
   @impl Supervisor

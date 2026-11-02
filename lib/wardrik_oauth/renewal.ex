@@ -9,6 +9,7 @@ defmodule WardrikOAuth.Renewal do
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Request
   alias WardrikOAuth.Token
+  alias WardrikVault.Secret
 
   @doc """
   Returns the grant's access token, refreshing it first with `provider` if it has expired.
@@ -28,14 +29,9 @@ defmodule WardrikOAuth.Renewal do
   def expire(settings, name, principal) do
     locked(name, principal, fn ->
       with {:ok, token, vsn} <- current(settings, name, principal) do
-        WardrikVault.put(
-          settings.vault,
-          principal,
-          name,
-          Token.encode(Token.expire(token)),
-          kind: :grant,
-          if_vsn: vsn
-        )
+        value = Token.encode(Token.expire(token))
+        expired = %Secret{principal: principal, name: name, value: value}
+        WardrikVault.put(settings.vault, expired, kind: :grant, if_vsn: vsn)
       end
     end)
 
@@ -64,10 +60,8 @@ defmodule WardrikOAuth.Renewal do
       {:ok, fresh} ->
         fresh = %{Token.carry_refresh(fresh, token) | provider: provider.key}
 
-        WardrikVault.put(settings.vault, principal, provider.name, Token.encode(fresh),
-          kind: :grant,
-          if_vsn: vsn
-        )
+        secret = %Secret{principal: principal, name: provider.name, value: Token.encode(fresh)}
+        WardrikVault.put(settings.vault, secret, kind: :grant, if_vsn: vsn)
 
         {:ok, fresh.access_token}
 

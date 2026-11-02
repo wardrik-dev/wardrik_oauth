@@ -8,6 +8,7 @@ defmodule WardrikOAuthTest do
   alias WardrikOAuth.GitHub
   alias WardrikOAuth.Provider
   alias WardrikOAuth.Token
+  alias WardrikVault.Secret
 
   @jon %Principal{id: "user:jon"}
   @acme_jon %Principal{id: "acme/@jon"}
@@ -110,8 +111,10 @@ defmodule WardrikOAuthTest do
   defp challenge(verifier),
     do: :sha256 |> :crypto.hash(verifier) |> Base.url_encode64(padding: false)
 
-  defp keep(vault, token),
-    do: WardrikVault.put(vault, @jon, "github", Token.encode(token), kind: :grant)
+  defp keep(vault, token) do
+    secret = %Secret{principal: @jon, name: "github", value: Token.encode(token)}
+    WardrikVault.put(vault, secret, kind: :grant)
+  end
 
   defp names(providers), do: Enum.map(providers, & &1.name)
 
@@ -146,7 +149,13 @@ defmodule WardrikOAuthTest do
              WardrikOAuth.authorize(oauth, "github_sealed", @jon)
 
     {:ok, _vsn} =
-      WardrikVault.put(vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", "sealed-secret",
+      WardrikVault.put(
+        vault,
+        %Secret{
+          principal: WardrikVault.deployment(),
+          name: "GITHUB_CLIENT_SECRET",
+          value: "sealed-secret"
+        },
         kind: :client_secret
       )
 
@@ -176,7 +185,9 @@ defmodule WardrikOAuthTest do
                WardrikOAuth.authorize(oauth, "crm", @acme_jon)
 
       {:ok, _vsn} =
-        WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "first",
+        WardrikVault.put(
+          vault,
+          %Secret{principal: %Principal{id: "acme"}, name: "CRM_SECRET", value: "first"},
           kind: :client_secret
         )
 
@@ -184,7 +195,9 @@ defmodule WardrikOAuthTest do
       assert_received {:exchanged, %{"client_id" => "acme-app", "client_secret" => "first"}}
 
       {:ok, _vsn} =
-        WardrikVault.put(vault, %Principal{id: "acme"}, "CRM_SECRET", "rotated",
+        WardrikVault.put(
+          vault,
+          %Secret{principal: %Principal{id: "acme"}, name: "CRM_SECRET", value: "rotated"},
           kind: :client_secret
         )
 
@@ -584,7 +597,10 @@ defmodule WardrikOAuthTest do
     end
 
     test "asks again for a grant it can't read", %{vault: vault} do
-      {:ok, _vsn} = WardrikVault.put(vault, @jon, "github", "not json", kind: :grant)
+      {:ok, _vsn} =
+        WardrikVault.put(vault, %Secret{principal: @jon, name: "github", value: "not json"},
+          kind: :grant
+        )
 
       assert {:authorize, _url} = WardrikVault.resolve(credential("github", @jon), vault)
     end
@@ -605,7 +621,9 @@ defmodule WardrikOAuthTest do
           )
 
         {:ok, _vsn} =
-          WardrikVault.put(vault, %Principal{id: owner}, "SECRET", owner <> "-secret",
+          WardrikVault.put(
+            vault,
+            %Secret{principal: %Principal{id: owner}, name: "SECRET", value: owner <> "-secret"},
             kind: :client_secret
           )
       end
@@ -688,13 +706,10 @@ defmodule WardrikOAuthTest do
   end
 
   defp keep_crm(vault, fields) do
-    {:ok, _vsn} =
-      WardrikVault.put(
-        vault,
-        @acme_jon,
-        "crm",
-        Token.encode(token([access_token: "old", refresh_token: "rt", expires_at: 0] ++ fields)),
-        kind: :grant
-      )
+    value =
+      Token.encode(token([access_token: "old", refresh_token: "rt", expires_at: 0] ++ fields))
+
+    secret = %Secret{principal: @acme_jon, name: "crm", value: value}
+    {:ok, _vsn} = WardrikVault.put(vault, secret, kind: :grant)
   end
 end

@@ -6,6 +6,7 @@ defmodule WardrikOAuth.ClientSecrets do
   """
 
   alias WardrikCore.Principal
+  alias WardrikVault.Secret
 
   @owner %Principal{id: "wardrik_oauth"}
 
@@ -14,7 +15,9 @@ defmodule WardrikOAuth.ClientSecrets do
   def seal(_settings, _name, nil), do: :ok
 
   def seal(settings, name, secret) do
-    case WardrikVault.put(settings.vault, @owner, name, secret, kind: :client_secret) do
+    sealed = %Secret{principal: @owner, name: name, value: secret}
+
+    case WardrikVault.put(settings.vault, sealed, kind: :client_secret) do
       {:ok, _vsn} -> :ok
       {:error, reason} -> {:error, reason}
     end

@@ -98,7 +98,11 @@ A `client_secret` of `{:secret, name}` is read from the provider's owner's vault
 time it's needed. Providers in `:providers` are the deployment's. Changing it takes no restart:
 
 ```elixir
-WardrikVault.put(MyApp.Vault, WardrikVault.deployment(), "GITHUB_CLIENT_SECRET", secret)
+WardrikVault.put(MyApp.Vault, %WardrikVault.Secret{
+  principal: WardrikVault.deployment(),
+  name: "GITHUB_CLIENT_SECRET",
+  value: secret
+})
 ```
 
 ## Give it to agents
