@@ -2,6 +2,9 @@ defmodule WardrikOAuth do
   @moduledoc """
   OAuth sign-in for WardrikCore agents. Tokens are sealed in a `WardrikVault`.
 
+  Application integration fragment. Start the required processes before calling these functions.
+  See the [package README](https://github.com/wardrik-dev/wardrik_oauth#readme) for complete setup.
+
       children = [
         {WardrikVault, name: MyApp.Vault, store: store, keys: keys, grants: {WardrikOAuth, MyApp.OAuth}},
         {WardrikOAuth,
